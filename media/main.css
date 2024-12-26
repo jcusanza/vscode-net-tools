@@ -1,13 +1,18 @@
 body {
-  padding: 0 20px;
+  padding: 0 16px;
   background-color: transparent;
 	color: var(--vscode-editor-foreground);
-	font-size: var(--vscode-editor-font-size);
-	font-weight: var(--vscode-editor-font-weight);
-	font-family: var(--vscode-editor-font-family);
 }
 
-
+.packet-output {
+	font-family: var(--vscode-editor-font-family);
+	font-size: var(--vscode-editor-font-size);
+	font-weight: var(--vscode-editor-font-weight);
+  display: grid;
+  grid-template-columns: 4ch 24ch 8.5ch;
+  grid-column-gap: 1ch;
+  grid-auto-rows: 1fr;
+}
 .packet-details {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -18,18 +23,33 @@ body {
   flex: 1;
 }
 
-.packet-hex {
-  float: right;
+.packet-selected {
+  background: var(--vscode-list-activeSelectionBackground);
+	color: var(--vscode-list-activeSelectionForeground);
+  outline: 1px solid var(--vscode-list-focusAndSelectionOutline, var(--vscode-contrastActiveBorder, var(--vscode-list-focusOutline)));
+	outline-offset: -1px;
+}
+
+.packet-index {
+  float: left;
+  overflow-wrap: break-word;
+  color: var(--vscode-editorLineNumber-foreground);
+}
+
+.packet-message {
+  float: left;
   overflow-wrap: break-word;
   margin: 1ch;
-  max-width: 24ch;
+}
+
+.packet-hex {
+  float: left;
+  overflow-wrap: break-word;
 }
 
 .packet-ascii {
-  float: right;
+  float: left;
   overflow-wrap: break-word;
-  margin: 1ch;
-  max-width: 8ch;
 }
 
 .tree {
@@ -72,11 +92,8 @@ body {
 
 .tree summary::before {
   display: block;
-
   position: absolute;
-
   left: 0;
-
   content: "˃";
 }
 

@@ -1,45 +1,90 @@
+import * as vscode from 'vscode';
+import { Node } from "../../packetdetailstree";
 import { GenericPacket } from "./genericPacket";
+import { FileContext } from "../file/FileContext";
 import { Address6 } from "ip-address";
 
 export class DNSPacket extends GenericPacket {
+	public static readonly Name = "DNS";
+
+	private static readonly _TransactionIDOffset = 0;
+	private static readonly _ResponseOffset = 2;
+	private static readonly _OpcodeOffset = 2;
+	private static readonly _AuthoritativeOffset = 2;
+	private static readonly _TruncatedOffset = 2;
+	private static readonly _RecursionDesiredOffset = 2;
+	private static readonly _RecursionAvailableOffset = 3;
+	private static readonly _ZOffset = 3;
+	private static readonly _ReplyCodeOffset = 3;
+	private static readonly _QuestionsOffset = 4;
+	private static readonly _AnswerRRsOffset = 6;
+	private static readonly _AuthorityRRsOffset = 8;
+	private static readonly _AdditionalRRsOffset = 10;
+	private static readonly _RecordOffset = 12;
+
+	private static readonly _TransactionIDLength = 2;
+	private static readonly _ResponseLength = 1;
+	private static readonly _OpcodeLength = 1;
+	private static readonly _AuthoritativeLength = 1;
+	private static readonly _TruncatedLength = 1;
+	private static readonly _RecursionDesiredLength = 1;
+	private static readonly _RecursionAvailableLength = 1;
+	private static readonly _ZLength = 1;
+	private static readonly _ReplyCodeLength = 1;
+	private static readonly _QuestionsLength = 2;
+	private static readonly _AnswerRRsLength = 2;
+	private static readonly _AuthorityRRsLength = 2;
+	private static readonly _AdditionalRRsLength = 2;
+
 	packet: DataView;
 	question: BaseRecord[] = [];
 	answer: ResourceRecord[] = [];
 	authority: ResourceRecord[] = [];
 	additional: ResourceRecord[] = [];
+	truncated: boolean;	
 
-	constructor(packet: DataView) {
-		super(packet);
+	constructor(packet: DataView, fc:FileContext) {
+		super(packet, fc);
 		this.packet = packet;
-		let recordOffset = 12;
-		for(let i  = 0; i < this.qdCount; i++) {
-			this.question.push(new BaseRecord(packet, recordOffset));
-			recordOffset += this.question[i].length;
+		let recordOffset = DNSPacket._RecordOffset;
+
+		this.registerProtocol(DNSPacket.Name, fc);
+
+		try {
+			for(let i  = 0; i < this.qdCount; i++) {
+				this.question.push(new BaseRecord(packet, recordOffset));
+				recordOffset += this.question[i].length;
+			}
+			for(let i  = 0; i < this.anCount; i++) {
+				this.answer.push(new ResourceRecord(packet, recordOffset));
+				recordOffset += this.answer[i].length;
+			}
+			for(let i  = 0; i < this.nsCount; i++) {
+				this.authority.push(new ResourceRecord(packet, recordOffset));
+				recordOffset += this.authority[i].length;
+			}		
+			for(let i  = 0; i < this.arCount; i++) {
+				this.additional.push(new ResourceRecord(packet, recordOffset));
+				recordOffset += this.additional[i].length;
+			}
+		} catch 
+		{
+			this.truncated = true; 
+			return;
 		}
-		for(let i  = 0; i < this.anCount; i++) {
-			this.answer.push(new ResourceRecord(packet, recordOffset));
-			recordOffset += this.answer[i].length;
-		}
-		for(let i  = 0; i < this.nsCount; i++) {
-			this.authority.push(new ResourceRecord(packet, recordOffset));
-			recordOffset += this.authority[i].length;
-		}		
-		for(let i  = 0; i < this.arCount; i++) {
-			this.additional.push(new ResourceRecord(packet, recordOffset));
-			recordOffset += this.additional[i].length;
-		}
+		this.truncated = false;
 	}
 
 	get TransactionID() {
-		return this.packet.getUint16(0);
+		return this.packet.getUint16(DNSPacket._TransactionIDOffset);
 	}
 
     get Response():boolean {
-		return (this.packet.getUint8(2) & 0x80) === 0x80;
+		return (this.packet.getUint8(DNSPacket._ResponseOffset) & 0x80) === 0x80;
 	}
 
     get Opcode() {
-		return (this.packet.getUint8(2) & 0x78) >> 3;
+		return (this.packet.getUint8(DNSPacket._OpcodeOffset) & 0x78) >> 3;
 	}
 
     get opMessage() {
@@ -52,121 +97,146 @@ export class DNSPacket extends GenericPacket {
     }
 
     get Authoritative() {
-		return (this.packet.getUint8(2) & 0x4) >> 2;
+		return (this.packet.getUint8(DNSPacket._AuthoritativeOffset) & 0x4) >> 2;
 	}	
 
     get Truncated() {
-		return (this.packet.getUint8(2) & 0x2) >> 1;
+		return (this.packet.getUint8(DNSPacket._TruncatedOffset) & 0x2) >> 1;
 	}	
 
     get RecursionDesired() {
-		return this.packet.getUint8(2) & 0x1;
+		return this.packet.getUint8(DNSPacket._RecursionDesiredOffset) & 0x1;
 	}	
 
     get RecursionAvailable() {
-		return this.packet.getUint8(3) >> 7;
+		return this.packet.getUint8(DNSPacket._RecursionAvailableOffset) >> 7;
 	}	
     
     get Z() {
-		return (this.packet.getUint8(3) & 0x70) >> 4;
+		return (this.packet.getUint8(DNSPacket._ZOffset) & 0x70) >> 4;
 	}	
 
     get ReplyCode() {
-		return this.packet.getUint8(3) & 0x0f;
+		return this.packet.getUint8(DNSPacket._ReplyCodeOffset) & 0x0f;
 	}	
 
     get qdCount() {
-		return this.packet.getUint16(4);
+		return this.packet.getUint16(DNSPacket._QuestionsOffset);
 	}	
 
     get anCount() {
-		return this.packet.getUint16(6);
+		return this.packet.getUint16(DNSPacket._AnswerRRsOffset);
 	}	
 
     get nsCount() {
-		return this.packet.getUint16(8);
+		return this.packet.getUint16(DNSPacket._AuthorityRRsOffset);
 	}   	
 
     get arCount() {
-		return this.packet.getUint16(10);
+		return this.packet.getUint16(DNSPacket._AdditionalRRsOffset);
 	}	
 
 	get toString() {
-		let questions = "";
-		this.question.forEach(item => {
-            questions += item.name + " ";
-        });
-		questions = questions.trimEnd();
+		try {
+			let questions = "";
+			this.question.forEach(item => {
+				questions += item.name + " ";
+			});
+			questions = questions.trimEnd();
 
-		let answers = "";
-		this.answer.forEach(item => {
-            answers += item.name + " ";
-        });
-		answers = answers.trimEnd();
-
-		return `DNS ${this.opMessage}${this.Response ? " response" : ""} 0x${this.TransactionID.toString(16).padStart(4, `0`)}${this.qdCount ? ", " + questions : ""}${this.anCount ? ", " + answers : ""}`;
+			let answers = "";
+			this.answer.forEach(item => {
+				answers += item.name + " ";
+			});
+			answers = answers.trimEnd();
+			let strTrunc = "";
+			if (this.truncated) {
+				strTrunc = " [Truncated]";
+			}
+			return `DNS ${this.opMessage}${this.Response ? " response" : ""} 0x${this.TransactionID.toString(16).padStart(4, `0`)}${this.qdCount ? ", " + questions : ""}${this.anCount ? ", " + answers : ""}${strTrunc}`;
+		} catch {
+			return `DNS - parse error`;
+		}
 	}
 
-	get getProperties() {
-		const arr: Array<any> = [];
-		arr.push(`*Domain Name System`);
-		arr.push(`Transaction ID: ${this.TransactionID}`);
-		const flags = [
-			`Flags: 0x${this.Opcode.toString(16).padStart(4, "0")} ${this.opMessage}`,
-			`Response: ${this.Response ? `Message is a response` : `Message is a query`}`,
-			`Authoritative: Server is ${this.Authoritative ? `` : `not `}an authority for domain`,
-			`Truncated: Message is ${this.Truncated ? `` : `not `}truncated`,
-			`Recursion desired: Do ${this.RecursionDesired ? `` : `not `}query recursively`,
-			`Recursion available: Server can${this.RecursionAvailable ? `` : `not`} do recursive queries`,
-			`Z: Reserved (${this.Z})`
-		];
-		switch(this.ReplyCode) {
-			case 0: flags.push(`Reply code: No error (0)`); break;
-			case 1: flags.push(`Reply code: Format error (1)`); break;
-			case 2: flags.push(`Reply code: Server error (2)`); break;
-			case 3: flags.push(`Reply code: Name error (3)`); break;
-			case 4: flags.push(`Reply code: Not implemented (4)`); break;
-			case 5: flags.push(`Reply code: Refused (5)`); break;
-			default: flags.push(`Reply code: Unknown reply code (${this.ReplyCode})`);
-		}
-		arr.push(flags);
-		arr.push(`Questions: ${this.qdCount}`);
-		arr.push(`Answer RRs: ${this.anCount}`);
-		arr.push(`Authority RRs: ${this.nsCount}`);
-		arr.push(`Additional RRs: ${this.arCount}`);
+	get getProperties(): Node[] {
+		const byteOffset = this.packet.byteOffset;
+		const defaultState = vscode.TreeItemCollapsibleState.None;
+
+		const element = new Node("Domain Name System", ``, vscode.TreeItemCollapsibleState.Collapsed, byteOffset, this.packet.byteLength);
+        element.children.push(new Node("Transaction ID", `${this.TransactionID}`, defaultState, byteOffset + DNSPacket._TransactionIDOffset, DNSPacket._TransactionIDLength));
+		const element2 = new Node("Flags", `0x${this.Opcode.toString(16).padStart(4, "0")} ${this.opMessage}`, vscode.TreeItemCollapsibleState.Collapsed, byteOffset + DNSPacket._OpcodeOffset, DNSPacket._OpcodeLength);
+		element2.children.push(new Node(`Response`, `${this.Response ? `Message is a response` : `Message is a query`}`, defaultState, byteOffset + DNSPacket._ResponseOffset, DNSPacket._ResponseLength));
+		element2.children.push(new Node(`Authoritative`, `Server is ${this.Authoritative ? `` : `not `}an authority for domain`, defaultState, byteOffset + DNSPacket._AuthoritativeOffset, DNSPacket._AuthoritativeLength));
+		element2.children.push(new Node(`Truncated`, `Message is ${this.Truncated ? `` : `not `}truncated`, defaultState, byteOffset + DNSPacket._TruncatedOffset, DNSPacket._TruncatedLength));
+		element2.children.push(new Node(`Recursion desired`, `Do ${this.RecursionDesired ? `` : `not `}query recursively`, defaultState, byteOffset + DNSPacket._RecursionDesiredOffset, DNSPacket._RecursionDesiredLength));
+		element2.children.push(new Node(`Recursion available`, `Server can${this.RecursionAvailable ? `` : `not`} do recursive queries`, defaultState, byteOffset + DNSPacket._RecursionAvailableOffset, DNSPacket._RecursionAvailableLength));
+		element2.children.push(new Node(`Z`, `Reserved (${this.Z})`, defaultState, byteOffset + DNSPacket._ZOffset, DNSPacket._ZLength));
+		element.children.push(element2);
+        element.children.push(new Node("Questions", `${this.qdCount}`, defaultState, byteOffset + DNSPacket._QuestionsOffset, DNSPacket._QuestionsLength));
+        element.children.push(new Node("Answer RRs", `${this.anCount}`, defaultState, byteOffset + DNSPacket._AnswerRRsOffset, DNSPacket._AnswerRRsLength));
+        element.children.push(new Node("Authority RRs", `${this.nsCount}`, defaultState, byteOffset + DNSPacket._AuthorityRRsOffset, DNSPacket._AuthorityRRsLength));
+        element.children.push(new Node("Additional RRs", `${this.arCount}`, defaultState, byteOffset + DNSPacket._AdditionalRRsOffset, DNSPacket._AdditionalRRsLength));
+
+		let _byteOffset = byteOffset + DNSPacket._RecordOffset;
+		let _len = 0;
+
 		if(this.qdCount) {
-			const qArr: Array<any> = [];
-			qArr.push(`*Queries`);
 			this.question.forEach(item => {
-				qArr.push(item.toString);
+				_len += item.length;
 			});
-			arr.push(qArr);
+
+			const e2 = new Node("Queries", ``, vscode.TreeItemCollapsibleState.Collapsed, _byteOffset, _len);
+			this.question.forEach(item => {
+				e2.children.push(new Node(item.toString, ``, defaultState, _byteOffset, item.length));
+				_byteOffset += item.length;
+			});
+		    element.children.push(e2);
 		}
+
 		if(this.anCount) {
-			const anArr: Array<any> = [];
-			anArr.push(`*Answers`);
+			_len = 0;
 			this.answer.forEach(item => {
-				anArr.push(item.getProperties);
+				_len += item.length;
 			});
-			arr.push(anArr);
+
+			const e2 = new Node("Answers", ``, vscode.TreeItemCollapsibleState.Collapsed, _byteOffset, _len);
+			this.answer.forEach(item => {
+				e2.children = e2.children.concat(item.getProperties);
+			});
+		    element.children.push(e2);
 		}
+		
 		if(this.nsCount) {
-			const anArr: Array<any> = [];
-			anArr.push(`*Authoritative nameservers`);
+			_len = 0;
 			this.authority.forEach(item => {
-				anArr.push(item.getProperties);
+				_len += item.length;
 			});
-			arr.push(anArr);
+
+			const e2 = new Node("Authoritative nameservers", ``, vscode.TreeItemCollapsibleState.Collapsed, _byteOffset, _len);
+			this.authority.forEach(item => {
+				e2.children = e2.children.concat(item.getProperties);
+			});
+		    element.children.push(e2);
 		}
+		
 		if(this.arCount) {
-			const anArr: Array<any> = [];
-			anArr.push(`*Additional`);
+			_len = 0;
 			this.additional.forEach(item => {
-				anArr.push(item.getProperties);
+				_len += item.length;
 			});
-			arr.push(anArr);
+
+			const e2 = new Node("Additional", ``, vscode.TreeItemCollapsibleState.Collapsed, _byteOffset, _len);
+			this.additional.forEach(item => {
+				e2.children = e2.children.concat(item.getProperties);
+			});
+		    element.children.push(e2);
 		}
-		return arr;
+
+		if (this.truncated) {
+			element.children.push(new Node("[Truncated]", ``));
+		}
+        return [element];
 	}
 }
 
@@ -310,13 +380,13 @@ class ResourceRecord extends BaseRecord {
 	get toString() {
 		return `${this.name}: type ${this.typeName}, class ${this.className}, time to live: ${this.ttl} seconds, data length${this.rdLength}, ${this.rdata}`;
 	}
-	get getProperties() {
-		const arr: Array<any> = [];
-		arr.push(`*${this.name}: type ${this.typeName}, class ${this.className}`);
-		arr.push(`Time to live: ${this.ttl} sec`);
-		arr.push(`Data length: ${this.rdLength}`);
-		arr.push.apply(arr, this.rdata.getProperties);
-		return arr;
+
+	get getProperties(): Node[] {
+		const element = new Node(`${this.name}`, `Type ${this.typeName}, Class ${this.className}`, vscode.TreeItemCollapsibleState.Collapsed, this.packet.byteOffset + this._offset, this.nameLength);
+		element.children.push(new Node("Time to live", `${this.ttl} sec`, vscode.TreeItemCollapsibleState.None, this.packet.byteOffset + this._offset + this.nameLength + 4, 4));
+		element.children.push(new Node("Data length", `${this.rdLength}`, vscode.TreeItemCollapsibleState.None, this.packet.byteOffset + this._offset + this.nameLength + 8, 2));
+		element.children = element.children.concat(this.rdata.getProperties);
+		return [element];
 	}
 }
 
@@ -335,9 +405,9 @@ class RDATABase {
 		let ret = "";
 		return ret;
 	}
-	get getProperties() {
-		const arr: Array<any> = [];
-		return arr;
+
+	get getProperties(): Node[] {
+		return [];
 	}
 }
 
@@ -359,37 +429,48 @@ class TXTRData extends RDATABase {
 		}
 		return ret;
 	}
-	get getProperties() {
-		const arr: Array<any> = [];
-		this.txt.forEach(a => {
-			arr.push(`TXT: ${a}`);
-		});
-		return arr;
-	}
 
+	get getProperties(): Node[] {
+		const elements: Node[] = [];
+		let offset = this._rdata.byteOffset + this._offset;
+
+		this.txt.forEach(a => {
+			elements.push(new Node(`TXT`, `${a}`, vscode.TreeItemCollapsibleState.None, offset, a.length+1));
+			offset += a.length+1;
+		});
+		return elements;
+	}
 }
 
 // +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 // /                   PTRDNAME                    /
 // +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 class PTRRData extends RDATABase {
+	length: number;
 	constructor(rdata:DataView, offset:number, length:number) {
 		super(rdata, offset, length);
+		this.length = length;
 	}
 	get ptrdname():string
 	{
 		const [name, len] = BaseRecord.GetLabel(this._offset + 0, this._rdata);
 		return name;
 	}
-	get getProperties() {
-		return [`Domain Name: ${this.ptrdname}`];
-	}
 
+	get getProperties(): Node[] {
+		return [new Node(`Domain Name`, `${this.ptrdname}`, vscode.TreeItemCollapsibleState.None, this._rdata.byteOffset + this._offset, this.length)];
+	}
 }
 
 class SRVRData extends RDATABase {
+	target:string;
+	targetlength:number;
+
 	constructor(rdata:DataView, offset:number, length:number) {
 		super(rdata, offset, length);
+		const [name, len] = BaseRecord.GetLabel(this._offset + 6, this._rdata);
+		this.target = name;
+		this.targetlength = len;
 	}
 	get priority():number
 	{
@@ -403,17 +484,13 @@ class SRVRData extends RDATABase {
 	{
 		return this._rdata.getUint16(this._offset + 4);
 	}
-	get target():string
-	{
-		const [name, len] = BaseRecord.GetLabel(this._offset + 6, this._rdata);
-		return name;
-	}
-	get getProperties() {
+
+	get getProperties(): Node[] {
 		return [
-			`Priority: ${this.priority}`,
-			`Weight: ${this.weight}`,
-			`Port: ${this.port}`,
-			`Target: ${this.target}`
+			new Node(`Priority`, `${this.priority}`, vscode.TreeItemCollapsibleState.None, this._rdata.byteOffset + this._offset + 0, 2),
+			new Node(`Weight`, `${this.weight}`, vscode.TreeItemCollapsibleState.None, this._rdata.byteOffset + this._offset + 2, 2),
+			new Node(`Port`, `${this.port}`, vscode.TreeItemCollapsibleState.None, this._rdata.byteOffset + this._offset + 4, 2),
+			new Node(`Target`, `${this.target}`, vscode.TreeItemCollapsibleState.None, this._rdata.byteOffset + this._offset + 6, this.targetlength)
 		];
 	}
 }
@@ -429,10 +506,12 @@ class ARData extends RDATABase {
 	{
 		return `${this._rdata.getUint8(this._offset + 0)}.${this._rdata.getUint8(this._offset + 1)}.${this._rdata.getUint8(this._offset + 2)}.${this._rdata.getUint8(this._offset + 3)}`;
 	}
-	get getProperties() {
-		return [`Address: ${this.address}`];
-	}
 
+	get getProperties(): Node[] {
+		return [
+			new Node(`Address`, `${this.address}`, vscode.TreeItemCollapsibleState.None, this._rdata.byteOffset + this._offset, 4)
+		];
+	}
 }
 
 class AAAAData extends RDATABase {
@@ -446,25 +525,32 @@ class AAAAData extends RDATABase {
 		const na = Array.from(ua);
 		return Address6.fromByteArray(na).correctForm();
 	}
-	get getProperties() {
-		return [`Address: ${this.address}`];
-	}
 
+	get getProperties(): Node[] {
+		return [
+			new Node(`Address`, `${this.address}`, vscode.TreeItemCollapsibleState.None, this._rdata.byteOffset + this._offset, 16)
+		];
+	}
 }
 
 class CNAMEData extends RDATABase {
+	length: number;
+
 	constructor(rdata:DataView, offset:number, length:number) {
 		super(rdata, offset, length);
+		this.length = length;
 	}
 	get cname():string
 	{
 		const [name, len] = BaseRecord.GetLabel(this._offset + 0, this._rdata);
 		return name;
 	}
-	get getProperties() {
-		return [`CNAME: ${this.cname}`];
-	}
 
+	get getProperties(): Node[] {
+		return [
+			new Node(`CNAME`, `${this.cname}`, vscode.TreeItemCollapsibleState.None, this._rdata.byteOffset + this._offset, this.length)
+		];
+	}
 }
 
 class SOAData extends RDATABase {
@@ -506,16 +592,16 @@ class SOAData extends RDATABase {
 	{
 		return this._rdata.getUint32(this._offset + this._mlen + this._rlen + 16);
 	}
-	get getProperties() {
+
+	get getProperties(): Node[] {
 		return [
-			`Primary name server: ${this.mname}`,
-			`Responsible authority's mailbox: ${this.rname}`,
-			`Serial Number: ${this.serial}`,
-			`Refresh Interval: ${this.refresh} sec`,
-			`Retry Interval: ${this.retry} sec`,
-			`Expire limit: ${this.expire} sec`,
-			`Minimum TTL: ${this.minimum} sec`
+			new Node(`Primary name server`, `${this.mname}`, vscode.TreeItemCollapsibleState.None, this._rdata.byteOffset + this._offset, this._mlen),
+			new Node(`Responsible authority's mailbox`, `${this.rname}`, vscode.TreeItemCollapsibleState.None, this._rdata.byteOffset + this._offset + this._mlen, this._rlen),
+			new Node(`Serial Number`, `${this.serial}`, vscode.TreeItemCollapsibleState.None, this._rdata.byteOffset + this._offset + this._mlen + this._rlen + 0, 4),
+			new Node(`Refresh Interval`, `${this.refresh} sec`, vscode.TreeItemCollapsibleState.None, this._rdata.byteOffset + this._offset + this._mlen + this._rlen + 4, 4),
+			new Node(`Retry Interval`, `${this.retry} sec`, vscode.TreeItemCollapsibleState.None, this._rdata.byteOffset + this._offset + this._mlen + this._rlen + 8, 4),
+			new Node(`Expire limit`, `${this.expire} sec`, vscode.TreeItemCollapsibleState.None, this._rdata.byteOffset + this._offset + this._mlen + this._rlen + 12, 4),
+			new Node(`Minimum TTL`, `${this.minimum} sec`, vscode.TreeItemCollapsibleState.None, this._rdata.byteOffset + this._offset + this._mlen + this._rlen + 16, 4)
 		];
 	}
-
 }

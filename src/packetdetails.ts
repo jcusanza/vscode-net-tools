@@ -1,26 +1,74 @@
 import * as vscode from "vscode";
 import { Section } from "./parsers/file/section";
+import { PacketDetailsTree, Node } from "./packetdetailstree";
+import { ProtocolAnalysisTree, ProtocolNode } from "./protocolanalysis";
+import { pcapViewerDocument } from "./pcapviewer";
 
-export class PacketViewProvider implements vscode.WebviewViewProvider {
-  public static readonly viewType = "packetDetails.detailsView";
+export class PacketDetailsProvider implements vscode.WebviewViewProvider {
+  public static readonly viewType = "packetDetails.data"; //"packetDetails.detailsView";
 
   private _view?: vscode.WebviewView;
+  private _extensionUri: vscode.Uri;
+  private _section?: Section;
+  private _currentDocument?: pcapViewerDocument;
 
-  constructor(private readonly _extensionUri: vscode.Uri) {}
+  constructor(public readonly context: vscode.ExtensionContext) {
+    this._extensionUri = context.extensionUri;
+  }
 
-  public refresh(section?: Section) {
+  public checkDispose(document?: pcapViewerDocument) {
+    if (document === this._currentDocument) {
+      this._section = undefined;
+
+      if (this._view !== undefined)  {
+        this._view.webview.html = this._getHtmlForWebview(
+          this._view.webview,
+          this._section
+        );
+      }
+    }
+  }
+
+  public refresh(document?: pcapViewerDocument) {
+    if (this._view === undefined) {
+      return;
+    }
+
+    this._currentDocument = document;
+
+    if (document !== undefined) {
+      if (document.selectedSection !== -1) {
+        this._section = document.sections[document.selectedSection];
+
+        this._view.webview.html = this._getHtmlForWebview(
+          this._view.webview,
+          this._section
+        );
+
+        new PacketDetailsTree(this, this._section.getProperties);
+        return;
+      }
+    } 
+
+    this._section = undefined;
+
+    this._view.webview.html = this._getHtmlForWebview(
+      this._view.webview,
+      this._section
+    );
+  }
+
+  public select(start: number, length:number) {
     if (this._view === undefined) {
       return;
     }
 
     this._view.webview.html = this._getHtmlForWebview(
       this._view.webview,
-      section
+      this._section,
+      start, length
     );
 
-    if (section !== undefined) {
-      this._view.show?.(true);
-    }
   }
 
   public resolveWebviewView(
@@ -36,108 +84,63 @@ export class PacketViewProvider implements vscode.WebviewViewProvider {
     };
 
     webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
+
   }
 
-  private printArray(pa: Array<any>, depth: number): string {
-    let ret = "";
-    let bFirst = true;
-    let bBranch = false;
-
-    if (depth === 0) {
-      ret += `<ul class="tree">`;
-    }
-
-    pa.forEach((a) => {
-      if (Array.isArray(a)) {
-        ret += this.printArray(a, depth + 1);
-        ret += "</ul>";
-        ret += "</details>";
-        ret += "</li>";
-      } else {
-        let textNode = a.toString();
-        let textOpen = "";
-
-        if (textNode[0] === "*") {
-          textOpen = " open";
-          textNode = textNode.slice(1);
-        }
-
-        if (depth && bFirst) {
-          bFirst = false;
-          ret += `<li><details${textOpen}>`;
-          ret += `<summary><span>${textNode}</span></summary>`;
-          ret += "<ul>";
-        } else {
-          ret += `<li><span>${textNode}</span></li>`;
-        }
-      }
-    });
-
-    if (depth === 0) {
-      ret += "</ul>";
-    }
-
-    return ret;
-  }
-
-  // const arr:Array<any> = ["a", "b", "b2", ["c", ["e", "f"], "d"]];
-
-  // printArray(arr, 0);
-
-  private _getHtmlForWebview(webview: vscode.Webview, section?: Section) {
-    // Get the local path to main script run in the webview, then convert it to a uri we can use in the webview.
-
-    // Do the same for the stylesheet.
-    const styleResetUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this._extensionUri, "media", "reset.css")
-    );
-    const styleMainUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this._extensionUri, "media", "main.css")
-    );
+  private _getHtmlForWebview(webview: vscode.Webview, section?: Section, selectionStart: number = 0, selectionLength: number = 0) {
+    const styleResetUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, "media", "reset.css"));
+    const styleMainUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, "media", "main.css"));
 		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'main.js'));
 
-    // Use a nonce to only allow a specific script to be run.
     const nonce = getNonce();
 
     let strProperties = "";
     let strHex = "";
     let strASCII = "";
-    if (section !== undefined) {
-      strProperties = this.printArray(section.getProperties, 0);
+    let strIndex = "";
+    let lines = 0;
 
+    if (section !== undefined) {
       strHex = section.getHex;
       strASCII = section.getASCII;
+
+      lines = strASCII.length / 8;
+
+      if (selectionLength) {
+        selectionStart -= section.packetStartOffset;
+        let start = selectionStart * 3;
+        let end = (selectionStart + selectionLength) * 3;
+        strHex = strHex.slice(0, start) + `<span class="packet-selected">` + strHex.slice(start, end - 1) + `</span>` + strHex.slice(end - 1);
+        start = selectionStart;
+        end = selectionStart + selectionLength;
+        strASCII = strASCII.slice(0, start) + `<span class="packet-selected">` + strASCII.slice(start, end) + `</span>` + strASCII.slice(end);
+      }
     } else {
-      strProperties = "Select a packet in a pcap or pcapng file to display details.";
+      strProperties = "Select a packet from a pcap file to view packet bytes here.";
+      new PacketDetailsTree(this, [new Node("Select a packet from a pcap file to view packet details here.", "")]);
+    }
+  
+    for (let i = 0; i < lines; i++) {
+      strIndex += (i*8).toString(16).padStart(4, "0");
     }
 
     return `<!DOCTYPE html>
 			<html lang="en">
 			<head>
 				<meta charset="UTF-8">
-
-				<!--
-					Use a content security policy to only allow loading styles from our extension directory,
-					and only allow scripts that have a specific nonce.
-					(See the 'webview-sample' extension sample for img-src content security policy examples)
-				-->
 				<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
-
 				<meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 				<link href="${styleResetUri}" rel="stylesheet">
 				<link href="${styleMainUri}" rel="stylesheet">
-
-				<title>Cat Colors</title>
+				<title>Packet Details</title>
 			</head>
 			<body>
-				<div class="packet-details">
-					<div class="packet-properties"> ${strProperties} </div>
-          <div class="packet-data">
-            <span class="packet-ascii"> ${strASCII} </span>
+          <span class="packet-message">${strProperties}</span>
+          <span class="packet-output">
+            <span class="packet-index"> ${strIndex} </span>
             <span class="packet-hex"> ${strHex} </span>
-          </div>
-        </div>
+            <span class="packet-ascii"> ${strASCII} </span>
+          </span>
 			</body>
 			</html>`;
   }

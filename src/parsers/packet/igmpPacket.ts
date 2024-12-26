@@ -1,9 +1,38 @@
+import * as vscode from 'vscode';
+import { Node } from "../../packetdetailstree";
 import { GenericPacket } from "./genericPacket";
+import { FileContext } from "../file/FileContext";
 
 export class igmpPacket extends GenericPacket {
+	public static readonly Name = "IGMP";
 
-	constructor(packet: DataView) {
-		super(packet);
+	private static readonly _TypeOffset = 0;
+	private static readonly _MaxRespTimeOffset = 1;
+	private static readonly _ChecksumOffset = 2;
+	private static readonly _GroupAddressOffset = 4;
+	private static readonly _SuppressRouterSideProcessingOffset = 8;
+	private static readonly _QRVOffset = 8;
+	private static readonly _QQICOffset = 9;
+	private static readonly _NumberOfSourcesOffset = 10;
+	private static readonly _SourcesOffset = 12;
+	private static readonly _NumberOfGroupRecordsOffset = 6;
+	private static readonly _GroupRecordsOffset = -1;
+
+	private static readonly _TypeLength = 1;
+	private static readonly _MaxRespTimeLength = 1;
+	private static readonly _ChecksumLength = 2;
+	private static readonly _GroupAddressLength = 4;
+	private static readonly _SuppressRouterSideProcessingLength = 1;
+	private static readonly _QRVLength = 1;
+	private static readonly _QQICLength = 1;
+	private static readonly _NumberOfSourcesLength = 2;
+	private static readonly _SourceLength = 4;
+	private static readonly _NumberOfGroupRecordsLength = 2;
+	private static readonly _GroupRecordsLength = -1;
+
+	constructor(packet: DataView, fc:FileContext) {
+		super(packet, fc);
+		this.registerProtocol(igmpPacket.Name, fc);
 	}
 
 	get version():number {
@@ -22,10 +51,10 @@ export class igmpPacket extends GenericPacket {
 		}
 	}
 	get Type():number {
-		return this.packet.getUint8(0);
+		return this.packet.getUint8(igmpPacket._TypeOffset);
 	}
 	get MaxRespTime():number {  
-		let val = this.packet.getUint8(1);
+		let val = this.packet.getUint8(igmpPacket._MaxRespTimeOffset);
 		if (val < 128) {
 			return val;
 		}
@@ -35,15 +64,15 @@ export class igmpPacket extends GenericPacket {
 		return (mant | 0x10) << (exp + 3);
 	}
 	get Checksum():number {
-		return this.packet.getUint16(2);
+		return this.packet.getUint16(igmpPacket._ChecksumOffset);
 	}
 
 	get GroupAddress():string {
 		let ret = "";
-		ret += this.packet.getUint8(4) + ".";
-		ret += this.packet.getUint8(5) + ".";
-		ret += this.packet.getUint8(6) + ".";
-		ret += this.packet.getUint8(7);
+		ret += this.packet.getUint8(igmpPacket._GroupAddressOffset) + ".";
+		ret += this.packet.getUint8(igmpPacket._GroupAddressOffset+1) + ".";
+		ret += this.packet.getUint8(igmpPacket._GroupAddressOffset+2) + ".";
+		ret += this.packet.getUint8(igmpPacket._GroupAddressOffset+3);
 		return ret;
 	}
 
@@ -51,19 +80,19 @@ export class igmpPacket extends GenericPacket {
 		if (this.Type !== 0x11 || this.packet.byteLength < 9) {
 			return false;
 		}
-		return ((this.packet.getUint8(8) >> 3) & 0x01) > 0;
+		return ((this.packet.getUint8(igmpPacket._SuppressRouterSideProcessingOffset) >> 3) & 0x01) > 0;
 	}
 	get QRV():number {
 		if (this.Type !== 0x11 || this.packet.byteLength < 9) {
 			return 0;
 		}
-		return this.packet.getUint8(8) & 0x07;
+		return this.packet.getUint8(igmpPacket._QRVOffset) & 0x07;
 	}
 	get QQIC():number {
 		if (this.Type !== 0x11 || this.packet.byteLength < 10) {
 			return 0;
 		}
-		let val = this.packet.getUint8(9);
+		let val = this.packet.getUint8(igmpPacket._QQICOffset);
 		if (val < 128) {
 			return val;
 		}
@@ -76,26 +105,33 @@ export class igmpPacket extends GenericPacket {
 		if (this.Type !== 0x11 || this.packet.byteLength < 12) {
 			return 0;
 		}
-		return this.packet.getUint16(10); 
+		return this.packet.getUint16(igmpPacket._NumberOfSourcesOffset); 
 	}
+	
+	get SourcesLength():number {
+		return this.NumberOfSources * 4;
+	}
+
 	get Sources():String[] {
 		const ret:String[] = [];
 		for (let i = 0; i < this.NumberOfSources; i++) {
 			let source = "";
-			source += this.packet.getUint8(12+i*4) + ".";
-			source += this.packet.getUint8(13+i*4) + ".";
-			source += this.packet.getUint8(14+i*4) + ".";
-			source += this.packet.getUint8(15+i*4);
+			source += this.packet.getUint8(igmpPacket._SourcesOffset + 0 + i*4) + ".";
+			source += this.packet.getUint8(igmpPacket._SourcesOffset + 1 + i*4) + ".";
+			source += this.packet.getUint8(igmpPacket._SourcesOffset + 2 + i*4) + ".";
+			source += this.packet.getUint8(igmpPacket._SourcesOffset + 3 + i*4);
 			ret.push(source);
 		}; 
 		return ret;
 	}
+
 	get NumberOfGroupRecords():number {
 		if (this.Type !== 0x22) {
 			return 0;
 		}
-		return this.packet.getUint16(6); 
+		return this.packet.getUint16(igmpPacket._NumberOfGroupRecordsOffset); 
 	}
+
 	get GroupRecords():GroupRecord[] {
 		const ret:GroupRecord[] = [];
 		let nextOffset = this.packet.byteOffset + 8;
@@ -148,69 +184,89 @@ export class igmpPacket extends GenericPacket {
 		
 	}
 
-	get getProperties() {
-		const igmpInfo: Array<any> = [];
-		if (this.Type === 0xFF || this.Type === 0xFE || this.Type === 0xFD || this.Type === 0xFC) {
-			igmpInfo.push(`*Router-port Group Management Protocol`); 
-		} else {
-			igmpInfo.push(`*Internet Group Management Protocol`); 
-		}
+	get getProperties(): Node[] {
+		const byteOffset = this.packet.byteOffset;
+		const defaultState = vscode.TreeItemCollapsibleState.None;
 
-		igmpInfo.push(`Type: ${this.TypeName} (0x${this.Type.toString(16).padStart(2, "0")})`);
-		if (this.Type === 0x11) {
-			igmpInfo.push(`Max Resp Time: ${this.MaxRespTime/10.0} sec (0x${this.MaxRespTime.toString(16).padStart(2, "0")})`);
-		}	
-		igmpInfo.push(`Checksum: 0x${this.Checksum.toString(16).padStart(4, "0")}`);
-		if (this.Type !== 0x22) {
-			igmpInfo.push(`Multicast Address: ${this.GroupAddress}`); 
+		let igmpName = "";
+		
+		if (this.Type === 0xFF || this.Type === 0xFE || this.Type === 0xFD || this.Type === 0xFC) {
+			igmpName = `Router-port Group Management Protocol`; 
 		} else {
-			igmpInfo.push(`Number of Group Records: ${this.NumberOfGroupRecords}`); 
+			igmpName = `Internet Group Management Protocol`; 
+		}
+		
+		const element = new Node(igmpName, ``, vscode.TreeItemCollapsibleState.Collapsed, byteOffset, this.packet.byteLength);
+		element.children.push(new Node(`Type`, `${this.TypeName} (0x${this.Type.toString(16).padStart(2, "0")})`, defaultState, byteOffset + igmpPacket._TypeOffset, igmpPacket._TypeLength));
+
+		if (this.Type === 0x11) {
+			element.children.push(new Node(`Max Resp Time`, `${this.MaxRespTime/10.0} sec (0x${this.MaxRespTime.toString(16).padStart(2, "0")})`, defaultState, byteOffset + igmpPacket._MaxRespTimeOffset, igmpPacket._MaxRespTimeLength));
+		}	
+		element.children.push(new Node(`Checksum`, `0x${this.Checksum.toString(16).padStart(4, "0")}`, defaultState, byteOffset + igmpPacket._ChecksumOffset, igmpPacket._ChecksumLength));
+		if (this.Type !== 0x22) {
+			element.children.push(new Node(`Multicast Address`, `${this.GroupAddress}`, defaultState, byteOffset + igmpPacket._GroupAddressOffset, igmpPacket._GroupAddressLength)); 
+		} else {
+			element.children.push(new Node(`Number of Group Records`, `${this.NumberOfGroupRecords}`, defaultState, byteOffset + igmpPacket._NumberOfGroupRecordsOffset, igmpPacket._NumberOfGroupRecordsLength)); 
 			for (const gr of this.GroupRecords) {
-				igmpInfo.push(gr.getProperties);
+				element.children = element.children.concat(gr.getProperties);
 			}
 		}
 		if (this.version === 3 && this.Type === 0x11) {
-			igmpInfo.push(`Suppress Router Side Processing: ${this.SuppressRouterSideProcessing}`); 
-			igmpInfo.push(`Querier's Robustness Value (QRV): ${this.QRV}`); 
-			igmpInfo.push(`Querier's Query Interval (QQIC): ${this.QQIC} sec`); 
-			const Sources:Array<any> = [];
-			Sources.push(`Sources (${this.NumberOfSources})`); 
-			for (const s of this.Sources) {
-				Sources.push(`Source Address ${Sources.length}: ${s}`);
-			}
-			igmpInfo.push(Sources);	
+			element.children.push(new Node(`Suppress Router Side Processing`, `${this.SuppressRouterSideProcessing}`, defaultState, byteOffset + igmpPacket._SuppressRouterSideProcessingOffset, igmpPacket._SuppressRouterSideProcessingLength)); 
+			element.children.push(new Node(`Querier's Robustness Value (QRV)`, `${this.QRV}`, defaultState, byteOffset + igmpPacket._QRVOffset, igmpPacket._QRVLength)); 
+			element.children.push(new Node(`Querier's Query Interval (QQIC)`, `${this.QQIC} sec`, defaultState, byteOffset + igmpPacket._QQICOffset, igmpPacket._QQICLength)); 
+
+			if (this.Sources.length) {
+				let sourceOffset = byteOffset + igmpPacket._SourcesOffset;
+				const element2 = new Node(`Sources`, `${this.NumberOfSources}`, vscode.TreeItemCollapsibleState.Collapsed, byteOffset + igmpPacket._NumberOfSourcesOffset, igmpPacket._NumberOfSourcesLength);
+				for (const s of this.Sources) {
+					element2.children.push(new Node(`Source Address`,  `${s}`, defaultState, sourceOffset, igmpPacket._SourceLength));
+					sourceOffset += igmpPacket._SourceLength;
+				}
+				element.children.push(element2);
+			}	
 		}
 
-		return igmpInfo;
+		return [element];
 	}
 }
 
 class GroupRecord {
+	private static readonly _RecordTypeOffset = 0;
+	private static readonly _NumberOfSourcesOffset = 2;
+	private static readonly _MulticastAddressOffset = 4;
+	private static readonly _SourceAddressesOffset = 8;
+
+	private static readonly _RecordTypeLength = 1;
+	private static readonly _NumberOfSourcesLength = 2;
+	private static readonly _MulticastAddressLength = 4;
+	private static readonly _SourceAddressLength = 4;
+
 	constructor(private _record: DataView) {
 	}
 
 	get RecordType():number {
-		return this._record.getUint8(0);
+		return this._record.getUint8(GroupRecord._RecordTypeOffset);
 	}
 	get NumberOfSources():number {
-		return this._record.getUint16(2);
+		return this._record.getUint16(GroupRecord._NumberOfSourcesOffset);
 	}
 	get MulticastAddress():string {
 		let ret:string = "";
-		ret += this._record.getUint8(4) + ".";
-		ret += this._record.getUint8(5) + ".";
-		ret += this._record.getUint8(6) + ".";
-		ret += this._record.getUint8(7);
+		ret += this._record.getUint8(GroupRecord._MulticastAddressOffset) + ".";
+		ret += this._record.getUint8(GroupRecord._MulticastAddressOffset+1) + ".";
+		ret += this._record.getUint8(GroupRecord._MulticastAddressOffset+2) + ".";
+		ret += this._record.getUint8(GroupRecord._MulticastAddressOffset+3);
 		return ret;
 	}
 	get SourceAddresses():string[] {
 		const ret:string[] = [];
 		for (let i = 0; i < this.NumberOfSources; i++) {
 			let source = "";
-			source += this._record.getUint8(8+i*4) + ".";
-			source += this._record.getUint8(9+i*4) + ".";
-			source += this._record.getUint8(10+i*4) + ".";
-			source += this._record.getUint8(11+i*4);
+			source += this._record.getUint8(GroupRecord._SourceAddressesOffset + 0 + i*4) + ".";
+			source += this._record.getUint8(GroupRecord._SourceAddressesOffset + 1 + i*4) + ".";
+			source += this._record.getUint8(GroupRecord._SourceAddressesOffset + 2 + i*4) + ".";
+			source += this._record.getUint8(GroupRecord._SourceAddressesOffset + 3 + i*4);
 			ret.push(source);
 		}; 
 		return ret;
@@ -236,18 +292,26 @@ class GroupRecord {
 		}
 		return ret.substring(0, ret.length - 2) + "}";
 	}
-	get getProperties() {
+
+	get getProperties(): Node[] {
+		const byteOffset = this._record.byteOffset;
+		const defaultState = vscode.TreeItemCollapsibleState.None;
+
 		const RecordTypes = ["", "Mode is Include", "Mode is Exclude", "Change to Include mode", "Change to Exclude mode", "Allow new sources", "Block old sources"];
-		const recordInfo: Array<any> = [];
-		recordInfo.push(`Group Record : ${this.MulticastAddress}, ${RecordTypes[this.RecordType]}`); 
-		recordInfo.push(`Record Type: ${RecordTypes[this.RecordType]} (${this.RecordType})`);
-		recordInfo.push(`Multicast Address: ${this.MulticastAddress}`);
-		const Sources:Array<any> = [];
-		Sources.push(`Sources (${this.NumberOfSources})`); 
-		for (const s of this.SourceAddresses) {
-			Sources.push(`Source Address ${Sources.length}: ${s}`);
+		const element = new Node(`Group Record`, `${this.MulticastAddress}, ${RecordTypes[this.RecordType]}`, vscode.TreeItemCollapsibleState.Collapsed, this._record.byteOffset, GroupRecord._SourceAddressesOffset + this.NumberOfSources*4);
+		element.children.push(new Node(`Record Type`, `${RecordTypes[this.RecordType]} (${this.RecordType})`, defaultState, byteOffset + GroupRecord._RecordTypeOffset, GroupRecord._RecordTypeLength));
+		element.children.push(new Node(`Multicast Address`, `${this.MulticastAddress}`, defaultState, byteOffset + GroupRecord._MulticastAddressOffset, GroupRecord._MulticastAddressLength));
+
+		if (this.SourceAddresses.length) {
+			let sourceOffset = byteOffset + GroupRecord._SourceAddressesOffset;
+			const element2 = new Node(`Sources`, `${this.NumberOfSources}`, vscode.TreeItemCollapsibleState.Collapsed, byteOffset + GroupRecord._NumberOfSourcesOffset, GroupRecord._NumberOfSourcesLength);
+			for (const s of this.SourceAddresses) {
+				element2.children.push(new Node(`Source Address`,  `${s}`, defaultState, sourceOffset, GroupRecord._SourceAddressLength));
+				sourceOffset += GroupRecord._SourceAddressLength;
+			}
+			element.children.push(element2);
 		}
-		recordInfo.push(Sources);		
-		return recordInfo;
+
+		return [element];
 	}
 }

@@ -2,12 +2,23 @@ import * as vscode from 'vscode';
 import { readFileSync } from 'fs';
 import { Disposable, disposeAll } from './dispose';
 import { PCAPNGEnhancedPacketBlock, PCAPNGSimplePacketBlock, PCAPPacketRecord, Section } from "./parsers/file/section";
-import { PacketViewProvider } from './packetdetails';
+import { PacketDetailsProvider } from './packetdetails';
+import { PacketDetailsTree } from './packetdetailstree';
+import { ProtocolAnalysisTree, ProtocolNode } from './protocolanalysis';
+import { FileContext } from './parsers/file/FileContext';
 
 /**
  * Define the document (the data model) used for paw draw files.
  */
-class pcapViewerDocument extends Disposable implements vscode.CustomDocument {
+
+	//#region pcapViewerDocument
+enum AddressType {
+	Hardware,
+	IPv4,
+	IPv6
+}
+
+export class pcapViewerDocument extends Disposable implements vscode.CustomDocument {
 
 	static async create(
 		uri: vscode.Uri
@@ -29,7 +40,7 @@ class pcapViewerDocument extends Disposable implements vscode.CustomDocument {
 	private _documentData: Uint8Array;
 	private _sections: Array<Section> = [];
 	public selectedSection: number = -1;
-
+	public fc: FileContext;
 
 	private constructor(
 		uri: vscode.Uri,
@@ -39,17 +50,16 @@ class pcapViewerDocument extends Disposable implements vscode.CustomDocument {
 		this._uri = uri;
 		this._documentData = initialContent;
 
-		const bytes = this._documentData;
-		const header = Section.create(bytes);
-		let offset = header.endoffset;
+		let start = new Date();
 
-		let packet = header;
-		this._sections.push(packet);
+		this.fc = new FileContext(this._documentData);
 
-		while(offset < bytes.byteLength) {
-			
+		let offset = 0;
+		let packet;
+
+		while(offset < this.fc.bytes.byteLength) {
 			try {
-				packet = Section.createNext(bytes, packet, header);
+				packet = Section.create(this.fc);
 				this._sections.push(packet);
 			} catch(e) {
 				if (e instanceof Error) {
@@ -61,6 +71,9 @@ class pcapViewerDocument extends Disposable implements vscode.CustomDocument {
 			}
 			offset = packet.endoffset;
 		}
+
+		let finish = new Date();
+		console.log(`Run time: ${((finish.getTime()-start.getTime())/1000.0)}`);
 	}
 
 	public get sections(): Array<Section> {
@@ -163,11 +176,16 @@ class pcapViewerDocument extends Disposable implements vscode.CustomDocument {
  * - Implementing save, undo, redo, and revert.
  * - Backing up a custom editor.
  */
+	//#region CustomEditorProvider
+	
 export class pcapViewerProvider implements vscode.CustomReadonlyEditorProvider<pcapViewerDocument> {
 
 	private static newpcapViewerFileId = 1;
+	private isFilter = false;
+	private lastURI?:vscode.Uri = undefined;
+	private lastNode?:ProtocolNode = undefined;
 
-	public static register(context: vscode.ExtensionContext, details: PacketViewProvider): vscode.Disposable {
+	public static register(context: vscode.ExtensionContext, details: PacketDetailsProvider): vscode.Disposable {
 		vscode.commands.registerCommand("packetreader.pcap.new", () => {
 			const workspaceFolders = vscode.workspace.workspaceFolders;
 			if (!workspaceFolders) {
@@ -181,9 +199,15 @@ export class pcapViewerProvider implements vscode.CustomReadonlyEditorProvider<p
 			vscode.commands.executeCommand('vscode.openWith', uri, pcapViewerProvider.viewType);
 		});
 
+		const provider = new pcapViewerProvider(context, details);
+		vscode.commands.executeCommand('setContext', 'pcapviewer:isFilterMode', false);
+		vscode.commands.registerCommand('packetanalysis.select', (uri, node) => provider.select(uri, node));
+		vscode.commands.registerCommand('packetAnalysis.setFilterMode', () => provider.setFilterMode());
+		vscode.commands.registerCommand('packetAnalysis.setHighlightMode', () => provider.setHighlightMode());
+
 		return vscode.window.registerCustomEditorProvider(
 			pcapViewerProvider.viewType,
-			new pcapViewerProvider(context, details),
+			provider,
 			{
 				webviewOptions: {
 					retainContextWhenHidden: true,
@@ -202,10 +226,34 @@ export class pcapViewerProvider implements vscode.CustomReadonlyEditorProvider<p
 
 	constructor(
 		private readonly _context: vscode.ExtensionContext,
-		private readonly _details: PacketViewProvider
+		private readonly _details: PacketDetailsProvider
 	) { }
 
-	//#region CustomEditorProvider
+	public setFilterMode() {
+		this.isFilter = !this.isFilter;
+		vscode.commands.executeCommand('setContext', 'pcapviewer:isFilterMode', this.isFilter);
+
+		if (this.lastURI !== undefined && this.lastNode !== undefined) {
+			this.select(this.lastURI, this.lastNode);
+		}
+	}
+	public setHighlightMode() {
+		this.isFilter = !this.isFilter;
+		vscode.commands.executeCommand('setContext', 'pcapviewer:isFilterMode', this.isFilter);
+
+		if (this.lastURI !== undefined && this.lastNode !== undefined) {
+			this.select(this.lastURI, this.lastNode);
+		}
+	}
+
+	public async select(uri:vscode.Uri, node: ProtocolNode) {
+		this.lastURI = uri;
+		this.lastNode = node;
+
+		for (let w of this.webviews.get(uri)) {
+			let r = w.webview.postMessage({ command: 'customevent', filterMode: this.isFilter, data: node.items });
+		}
+	}
 
 	async openCustomDocument(
 		uri: vscode.Uri,
@@ -223,10 +271,74 @@ export class pcapViewerProvider implements vscode.CustomReadonlyEditorProvider<p
 				...e,
 			});
 		}));
-
-		document.onDidDispose(() => disposeAll(listeners));
+		
+		document.onDidDispose(() => { 
+			this._details.checkDispose(document);
+			disposeAll(listeners);
+			new ProtocolAnalysisTree(this._context, [], undefined);
+		});
 
 		return document;
+	}
+
+	private getAddressType(address:string):AddressType {
+		const macpattern = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
+		const ippattern = /^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$/;
+
+		if (macpattern.exec(address)) {
+			return AddressType.Hardware;
+		} if (ippattern.exec(address)) {
+			return AddressType.IPv4;
+		} else {
+			return AddressType.IPv6;
+		}
+
+	}
+
+	private createAnalysisTree(document:pcapViewerDocument) {
+		const elements = [
+			new ProtocolNode("Clear selection", "", vscode.TreeItemCollapsibleState.None),
+			new ProtocolNode("Protocols", "", vscode.TreeItemCollapsibleState.Expanded)
+		];
+		const pe = elements[1].children;
+		for (let entry of [...document.fc.protocols].sort((a, b) => a[0].localeCompare(b[0]))) {
+			const arr: number[] = []; 
+			for (let s of entry[1]) {
+				arr.push(s.lineNumber);
+			}
+			pe.push(new ProtocolNode(entry[0], `${entry[1].length} ${entry[1].length > 1 ? "packets" : "packet"}`,vscode.TreeItemCollapsibleState.None, arr));
+		}
+
+		const addresses = new ProtocolNode("Addresses", "", vscode.TreeItemCollapsibleState.Collapsed);
+		elements.push(addresses);
+		const ae = addresses.children;
+
+		let mac = new ProtocolNode("Hardware", "", vscode.TreeItemCollapsibleState.Collapsed);
+		ae.push(mac);
+		let ipv4 = new ProtocolNode("IPv4", "", vscode.TreeItemCollapsibleState.Collapsed);
+		ae.push(ipv4);
+		// let ipv4pvt = new ProtocolNode("IPv4 Private", "", vscode.TreeItemCollapsibleState.Collapsed);
+		// ae.push(ipv4pvt);
+		// let ipv4int = new ProtocolNode("IPv4 Internet", "", vscode.TreeItemCollapsibleState.Collapsed);
+		// ae.push(ipv4int);
+		let ipv6 = new ProtocolNode("IPv6", "", vscode.TreeItemCollapsibleState.Collapsed);
+		ae.push(ipv6);
+
+		for (let entry of [...document.fc.addresses].sort((a, b) => a[0].localeCompare(b[0]))) {
+			const arr: number[] = []; 
+			for (let s of entry[1]) {
+				arr.push(s.lineNumber);
+			}
+			let push = ae;
+			switch (this.getAddressType(entry[0])) {
+				case AddressType.Hardware: push = mac.children; break; 
+				case AddressType.IPv4: push = ipv4.children; break; 
+				case AddressType.IPv6: push = ipv6.children; break; 
+			}
+			push.push(new ProtocolNode(entry[0], `${entry[1].length} ${entry[1].length > 1 ? "packets" : "packet"}`,vscode.TreeItemCollapsibleState.None, arr));
+		}
+
+		const tree = new ProtocolAnalysisTree(this._context, elements, document);
 	}
 
 	async resolveCustomEditor(
@@ -244,28 +356,35 @@ export class pcapViewerProvider implements vscode.CustomReadonlyEditorProvider<p
 
 		webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview, document);
 
+		this.createAnalysisTree(document);
+
 		webviewPanel.webview.onDidReceiveMessage(data => {
 			switch (data.type) {
 				case 'packetSelected':
 					{
 						document.selectedSection = data.value;
-						this._details.refresh(document.sections[data.value]);
+						this._details.refresh(document);
 						break;
 					}
 			}
-		
 		});
 
 		webviewPanel.onDidChangeViewState(data => {
-
 			const panel = data.webviewPanel;
-			if(panel.visible && document.selectedSection !== -1) {
-				this._details.refresh(document.sections[document.selectedSection]);
 
+			if(panel.visible) {
+				this.createAnalysisTree(document);
+			} else {
+				new ProtocolAnalysisTree(this._context, [], undefined);
+			}
+			
+			if(panel.visible && document.selectedSection !== -1) {
+				this._details.refresh(document);
 			} else {
 				this._details.refresh(undefined);
 			}
 		});
+
 		
 	}
 
@@ -301,7 +420,7 @@ export class pcapViewerProvider implements vscode.CustomReadonlyEditorProvider<p
 		let lineOutput: string = "";
 		let lineNumberOutput: string = "";
 		let lines: number = 0;
-
+		let pktline: number = 1;
 
 		document.sections.forEach((section) => {
 			try {
@@ -321,11 +440,14 @@ export class pcapViewerProvider implements vscode.CustomReadonlyEditorProvider<p
 					section instanceof PCAPPacketRecord ||
 					section instanceof PCAPNGSimplePacketBlock
 				) {
-					_class = ` class="numbered"`;
+
+					_class = ` class="numbered" data-ln="${pktline.toString().padStart(document.sections.length.toString().length, '&').replaceAll('&', '&nbsp;')}"`;
+					pktline++;
 				}
 
-				lineNumberOutput += `<span${_class}></span>`;
+				lineNumberOutput += `<span${_class}"></span>`;
 				lineOutput += `<div${_class} id="${lines}">${section.toString}</div>`;
+				section.lineNumber = lines;
 				lines++;
 			} catch (e)
 			{
@@ -355,11 +477,6 @@ export class pcapViewerProvider implements vscode.CustomReadonlyEditorProvider<p
 				:root {
 					--nettools-before: "${"\\00a0".repeat(document.sections.length.toString().length)}";
 				}
-				@counter-style pad-counter {
-					system: numeric;
-					symbols: "0" "1" "2" "3" "4" "5" "6" "7" "8" "9";
-					pad: ${document.sections.length.toString().length} "\\00a0";
-				} 
 				${css}
 				</style>
 			</head>

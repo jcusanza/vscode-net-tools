@@ -1,9 +1,16 @@
+import * as vscode from 'vscode';
+import { Node } from "../../packetdetailstree";
 import { GenericPacket } from "./genericPacket";
+import { FileContext } from "../file/FileContext";
 import { EthernetPacket } from "./ether";
 
 export class pppoedPacket extends GenericPacket {
-	constructor(packet: DataView) {
-		super(packet);
+	public static readonly Name = "PPPoE";
+
+	constructor(packet: DataView, fc:FileContext) {
+		super(packet, fc);
+		this.registerProtocol(pppoedPacket.Name, fc);
+
 	}
 
 	get Version():number {
@@ -47,21 +54,22 @@ export class pppoedPacket extends GenericPacket {
 		return ret;
 	}
 
-	get getProperties() {
-		const tags: string[] = [`PPPoE Tags`];
-		this.tags.forEach( t => {
-			tags.push(t.toString);
-		});	
-		const pppoedInfo: Array<any> = [
-			`PPP-over-Ethernet ${this.CodeName}`,
-			`Version: ${this.Version}`,
-			`Type: ${this.Type}`,
-			`Code: ${this.CodeName} (0x${this.Code.toString(16).padStart(2, "0")})`,
-			`Payload Length: ${this.Length }`,
-			tags
-		];
+	get getProperties(): Node[] {
+		const element = new Node("PPP-over-Ethernet", `${this.CodeName}`, vscode.TreeItemCollapsibleState.Collapsed);
+		element.children.push(new Node(`Version`, `${this.Version}`));
+		element.children.push(new Node(`Type`, `${this.Type}`));
+		element.children.push(new Node(`Code`, `${this.CodeName} (0x${this.Code.toString(16).padStart(2, "0")})`));
+		element.children.push(new Node(`Payload Length`, `${this.Length}`));
+
+		if (this.tags.length) {
+			const e2 = new Node("PPPoE Tags", ``, vscode.TreeItemCollapsibleState.Collapsed);
+			this.tags.forEach( t => {
+				e2.children.push(new Node(t.toString, ``));
+			});	
+			element.children.push(e2);
+		}
 		
-		return [ pppoedInfo ];
+		return [element];
 	}
 }
 
@@ -76,7 +84,6 @@ class pppoeTag {
 	}
 	get Length():number {
 		let l = this._packet.getUint16(2);
-		console.log ("Len: " + l);
 		return l;
 	}
 	get Value() {
@@ -129,14 +136,18 @@ class pppoeTag {
 	get toString() {
 		return `${this.TypeName}: ${this.Value}`;
 	}
-	get getProperties() {
-		return [ `${this.TypeName}: ${this.Value}` ];
+
+	get getProperties(): Node[] {
+		return [new Node(`${this.TypeName}`, `${this.Value}`)];
 	}
 }
 
 export class pppoePacket extends GenericPacket {
-	constructor(packet: DataView) {
-		super(packet);
+	public static readonly Name = "PPPoE";
+
+	constructor(packet: DataView, fc:FileContext) {
+		super(packet, fc);
+		this.registerProtocol(pppoePacket.Name, fc);
 	}
 
 	get Version():number {
@@ -159,10 +170,7 @@ export class pppoePacket extends GenericPacket {
 		return `PPPoE ${super.toString}`;
 	}
 
-	get getProperties() {
-		const pppoeInfo: Array<any> = [
-		];
-		
-		return [ pppoeInfo, super.getProperties ];
+	get getProperties(): Node[] {
+		return [];
 	}
 }

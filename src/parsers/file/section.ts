@@ -1,6 +1,9 @@
 import { EthernetPacket } from "../packet/ether";
-import { GenericPacket } from "../packet/genericPacket";
+import { GenericPacket, PacketState } from "../packet/genericPacket";
 import { SLL2Packet } from "../packet/sll2";
+import { Node } from "../../packetdetailstree";
+import * as vscode from 'vscode';
+import { FileType, FileContext } from "./FileContext";
 
 function getLinkName(id:number):string {
 	switch (id) {
@@ -225,63 +228,86 @@ function getLinkName(id:number):string {
 export class Section {
 	startoffset: number = 0;
 	endoffset: number = 0;
+	lineNumber: number = 0;
 
-	static processPayload(linktype: number, payload: DataView): GenericPacket {
-			try {
-				if (linktype === 1) {  //Ethernet II
-					return new EthernetPacket(payload);
-				} else if (linktype === 276) { // Linux SLL2
-					return new SLL2Packet(payload);
-				} 
-			} catch (e) {
-				if (e instanceof Error) {
-					console.log(`Exception parsing payload, call stack: ${e.stack}`);
-				} else {
-					console.log(`Exception parsing payload.`);
-				}			
-			}  // In case of exception in parsing, treat as a generic packet.
+	static processPayload(linktype: number, payload: DataView, fc: FileContext): GenericPacket {
+		let p:GenericPacket;
 
-			return new GenericPacket(payload);
+		try {
+			if (linktype === 1) {  //Ethernet II
+				p = new EthernetPacket(payload, fc);
+			} else if (linktype === 276) { // Linux SLL2
+				p = new SLL2Packet(payload, fc);
+			} else {
+				p = new GenericPacket(payload, fc);
+			}
+		} catch (e) {
+			if (e instanceof Error) {
+				console.log(`Exception parsing payload, call stack: ${e.stack}`);
+			} else {
+				console.log(`Exception parsing payload.`);
+			}			
+			// In case of exception in parsing, treat as a generic packet.
+			p = new GenericPacket(payload, fc);
+		}  
+
+		return p;
 	}
 
 	constructor(
-		protected readonly _packet: DataView
+		protected readonly _packet: DataView, protected readonly fc: FileContext
 	) { 
 		this.startoffset = this._packet.byteOffset;
 		this.endoffset = this.startoffset + this._packet.byteLength;
+		fc.thisSection = this;
 	}
 
-	static create(bytes: Uint8Array): Section {
+	static create(fc: FileContext): Section {
+		let newSection: Section|undefined = undefined;
 		
-		const dv = new DataView(bytes.buffer, 0, bytes.byteLength);
-		const magic = dv.getUint32(0, true);
-		if (
-			magic === 0xa1b2c3d4 ||
-			magic === 0xa1b23c4d ||
-			magic === 0xd4c3b2a1 ||
-			magic === 0x4d3cb2a1
-		) {
-			return new PCAPHeaderRecord(bytes);
+		fc.headers = [];
+		
+		if (!fc.IsInitialized) {
+			const dv = new DataView(fc.bytes.buffer, 0, fc.bytes.byteLength);
+			const magic = dv.getUint32(0, true);
+			if (
+				magic === 0xa1b2c3d4 ||
+				magic === 0xa1b23c4d ||
+				magic === 0xd4c3b2a1 ||
+				magic === 0x4d3cb2a1
+			) {
+				const pcapheader = new PCAPHeaderRecord(fc);
+				fc.SetHeader(pcapheader, pcapheader.le, FileType.PCAP);
+				newSection = pcapheader;
+			}
+			if(magic === 0x0A0D0D0A) {
+				fc.le = dv.getUint32(8, true) === 0x1A2B3C4D;
+				const pcapngheader = PCAPNGSection.createPCAPNG(fc, 0) as PCAPNGSectionHeaderBlock;
+				fc.SetHeader(pcapngheader, pcapngheader.le, FileType.PCAPNG);
+				newSection = pcapngheader;
+			}
+		} else {
+			if(fc.fileType === FileType.PCAP) {
+				newSection = new PCAPPacketRecord(fc, fc.lastSection.endoffset);
+			}
+			if(fc.fileType === FileType.PCAPNG) {
+				newSection = PCAPNGSection.createPCAPNG(fc, fc.lastSection.endoffset);
+			}
 		}
-		if(magic === 0x0A0D0D0A) {
-			return PCAPNGSection.createPCAPNG(bytes, 0);
+		if (newSection === undefined) {
+			throw new Error("Invalid header for pcap/pcapng file.");
 		}
-		throw new Error("Not a pcap/pcapng");
+
+		fc.lastSection = newSection;
+		return newSection;
 	}
 
-	static createNext(bytes: Uint8Array, prevRecord: Section, headerRecord: Section): Section {
-		if(headerRecord.fileType === 1) {
-			return new PCAPPacketRecord(bytes, prevRecord.endoffset, headerRecord as PCAPHeaderRecord);
-		}
-		if(headerRecord.fileType === 2) {
-			return PCAPNGSection.createPCAPNG(bytes, prevRecord.endoffset, headerRecord as PCAPNGSectionHeaderBlock);
-		}
-
-		throw new Error("invalid");
-	}
-
-	get getProperties(): Array<any> {
+	get getProperties(): Node[] {
 		return [];
+	}
+
+	get packetStartOffset():number {
+		return this._packet.byteOffset;
 	}
 
 	get getHex(): string {
@@ -321,18 +347,19 @@ export class PCAPPacketRecord extends Section {
 	originallength: number;
 	packet: GenericPacket;
 
-	constructor(bytes: Uint8Array, offset: number, header: PCAPHeaderRecord) {
-		const dv = new DataView(bytes.buffer, offset, 16);
-		super(new DataView(bytes.buffer, offset, dv.getUint32(8, header.le) + 16));
+	constructor(fc: FileContext, offset: number) {
+		const header = fc.header as PCAPHeaderRecord;
+
+		const dv = new DataView(fc.bytes.buffer, offset, 16);
+		super(new DataView(fc.bytes.buffer, offset, dv.getUint32(8, fc.le) + 16), fc);
 		this.startoffset = offset;
-		header.isMS;
-		this.timestamp1 = new Date(this._packet.getUint32(0, header.le)*1000);
-		this.timestamp2 = this._packet.getUint32(4, header.le);
-		this.capturedlength = this._packet.getUint32(8, header.le);
-		this.originallength = this._packet.getUint32(12, header.le);
+		this.timestamp1 = new Date(this._packet.getUint32(0, fc.le)*1000);
+		this.timestamp2 = this._packet.getUint32(4, fc.le);
+		this.capturedlength = this._packet.getUint32(8, fc.le);
+		this.originallength = this._packet.getUint32(12, fc.le);
 		this.endoffset = this.capturedlength + offset + 16;
 
-		this.packet = Section.processPayload(header.linktype, new DataView(bytes.buffer, offset + 16, this.capturedlength));
+		this.packet = Section.processPayload(header.linktype, new DataView(fc.bytes.buffer, offset + 16, this.capturedlength), fc);
 		
 		if(header.isMS) {
 			this.timestamp2*=1000;
@@ -343,11 +370,17 @@ export class PCAPPacketRecord extends Section {
 		return `${this.timestamp1.getFullYear()}-${(this.timestamp1.getMonth()+1).toString().padStart(2, "0")}-${this.timestamp1.getDate().toString().padStart(2, "0")} ${this.timestamp1.getHours().toString().padStart(2, "0")}:${this.timestamp1.getMinutes().toString().padStart(2, "0")}:${this.timestamp1.getSeconds().toString().padStart(2, "0")}.${this.timestamp2.toString().padStart(9, "0")}: ${this.packet.toString}`;
 	}
 
-	get getProperties(): Array<any> {
-		return [
-			`Packet Block: ${this.originallength} bytes on wire, ${this.capturedlength} bytes captured`,
+	get getProperties(): Node[] {
+		const elements: Node[] = [];
+		return elements.concat(
+			new Node("Packet Block", `${this.originallength} bytes on wire, ${this.capturedlength} bytes captured`),
 			this.packet.getProperties
-		];
+		);
+	}
+	
+	
+	get packetStartOffset():number {
+		return this.packet.packet.byteOffset;
 	}
 
 	get getHex(): string {
@@ -361,7 +394,6 @@ export class PCAPPacketRecord extends Section {
 	get getASCII(): string {
 		const decoder = new TextDecoder('ascii');
 		return decoder.decode(this.packet.packet).replaceAll(/[\x00\W]/g, ".");
-
 	}
 }
 
@@ -378,8 +410,10 @@ export class PCAPHeaderRecord extends Section {
 	isFCS: boolean;
 	fcs: number;
 
-	constructor(bytes: Uint8Array) {
-		super(new DataView(bytes.buffer, 0, 24));
+	states: PacketState[] = [];
+
+	constructor(fc: FileContext) {
+		super(new DataView(fc.bytes.buffer, 0, 24), fc);
 		this.startoffset = 0;
 		this.magic = this._packet.getUint32(0, true);
 		if (
@@ -394,10 +428,10 @@ export class PCAPHeaderRecord extends Section {
 		this.isMS = this.magic === 0xa1b2c3d4 || this.magic === 0x4d3cb2a1;
 		this.major = this._packet.getUint16(4, this.le);
 		this.minor = this._packet.getUint16(6, this.le);
-		this.r1 = this._packet.getUint32(8, true);
-		this.r2 = this._packet.getUint32(12, true);
-		this.snaplen = this._packet.getUint32(16, true);
-		this.linktype = this._packet.getUint32(20, true);
+		this.r1 = this._packet.getUint32(8, this.le);
+		this.r2 = this._packet.getUint32(12, this.le);
+		this.snaplen = this._packet.getUint32(16, this.le);
+		this.linktype = this._packet.getUint32(20, this.le);
 		this.isFCS = ((this.linktype >> 28) & 0x1) === 0x1;
 		this.fcs = this.linktype >> 29;
 		this.linktype = this.linktype & 0x0fffffff;
@@ -424,65 +458,41 @@ export class PCAPHeaderRecord extends Section {
 
 
 export class PCAPNGSection extends Section {
-	_le: boolean;
-	
-	static createPCAPNG(bytes: Uint8Array, offset: number, header?: PCAPNGSectionHeaderBlock): Section {
+	static createPCAPNG(fc:FileContext, offset: number): Section {
+		let dv = new DataView(fc.bytes.buffer, offset, fc.bytes.byteLength - offset);
 		
-		if(bytes.byteLength <= offset) {
-			console.log("byte length less than offset");
-		}
-		let dv = new DataView(bytes.buffer, offset, bytes.byteLength - offset);
-		const le: boolean = header === undefined ? (dv.getUint32(8, true) === 0x1A2B3C4D): header.le;
-		const blockType = dv.getUint32(0, le);
-		const blockLength = Math.ceil(dv.getUint32(4, le) / 4) * 4;
-		dv = new DataView(bytes.buffer, offset, blockLength);
+		const blockType = dv.getUint32(0, fc.le);
+		const blockLength = Math.ceil(dv.getUint32(4, fc.le) / 4) * 4;
+		dv = new DataView(fc.bytes.buffer, offset, blockLength);
 
 		switch(blockType) {
 			case 0x0A0D0D0A:
-				return new PCAPNGSectionHeaderBlock(dv);
+				return new PCAPNGSectionHeaderBlock(dv, fc);
 			case 0x00000001:
-				if(header === undefined) {
-					throw new Error("header required");
-				}
-				return new PCAPNGInterfaceDescriptionBlock(dv, header);
+				return new PCAPNGInterfaceDescriptionBlock(dv, fc);
 			case 0x00000003:
-				if(header === undefined) {
-					throw new Error("header required");
-				}
-				return new PCAPNGSimplePacketBlock(dv, header);				
+				return new PCAPNGSimplePacketBlock(dv, fc);				
 			case 0x00000005:
-				if(header === undefined) {
-					throw new Error("header required");
-				}
-				return new PCAPNGInterfaceStatisticsBlock(dv, header);
+				return new PCAPNGInterfaceStatisticsBlock(dv, fc);
 			case 0x00000006:
-				if(header === undefined) {
-					throw new Error("header required");
-				}
-				return new PCAPNGEnhancedPacketBlock(dv, header);
+				return new PCAPNGEnhancedPacketBlock(dv, fc);
 			default:
-				if(header === undefined) {
-					throw new Error("header required");
-				}
-				return new PCAPNGGenericBlock(dv, header);
+				return new PCAPNGGenericBlock(dv, fc);
 		}
 	}
 
-	constructor(dv: DataView, le: boolean) {
-		super(dv);
-		this._le = le;
+	constructor(dv: DataView, fc: FileContext) {
+		super(dv, fc);
 	}
-
-	get le():boolean { return this._le; };
 
 	get optionStartOffset():number { return 20; };
 
 	get blockType():number {
-		return this._packet.getUint32(0, this.le);
+		return this._packet.getUint32(0, this.fc.le);
 	}
 
 	get blockLength():number {
-		return Math.ceil(this._packet.getUint32(4, this.le) / 4) * 4;
+		return Math.ceil(this._packet.getUint32(4, this.fc.le) / 4) * 4;
 	}
 
 	get comments():string[] {
@@ -509,7 +519,7 @@ export class PCAPNGSection extends Section {
 		let i = this._packet.byteOffset + this.optionStartOffset;
 		
 		do {
-			const option = new PCAPNGOption(this._packet.buffer, i, this.le);
+			const option = new PCAPNGOption(this._packet.buffer, i, this.fc.le);
 			if(option.code !== 0) {
 				options.push(option);
 			} else {
@@ -530,24 +540,25 @@ export class PCAPNGSection extends Section {
 export class PCAPNGInterfaceDescriptionBlock extends PCAPNGSection {
 	interfaceID: number;
 
-	constructor(dv: DataView, header: PCAPNGSectionHeaderBlock) {
-		super(dv, header.le);
+	constructor(dv: DataView, fc: FileContext) {
+		super(dv, fc);
+		const header = fc.header as PCAPNGSectionHeaderBlock;
 		header.interfaces.push(this);
 		this.interfaceID = header.interfaceCount++;
 	}
 	
 	get linkType() {
-		return this._packet.getUint16(8, this.le);
+		return this._packet.getUint16(8, this.fc.le);
 	}
 
 	get snapLen() {
-		return this._packet.getUint32(12, this.le);
+		return this._packet.getUint32(12, this.fc.le);
 	}
 
 	get optionStartOffset():number { return 16; };
 
 	get toString() {
-		return `Interface ${this.interfaceID}: ${this.Name}`;
+		return `Interface ${this.interfaceID}: ${this.Name}, ${getLinkName(this.linkType)} (${this.linkType})`;
 	}
 
 	get Name():string {
@@ -562,10 +573,8 @@ export class PCAPNGInterfaceDescriptionBlock extends PCAPNGSection {
 		return "Unnamed";
 	}
 
-	get getProperties(): Array<any> {
-		const arr: Array<any> = [
-			"*Interface Description Block"
-		];
+	get optionText(): string[] {
+		const arr = [];
 		const decoder = new TextDecoder('utf-8');
 		if(this.options !== undefined) {
 			for(let i = 0; i < this.options?.length; i++) {
@@ -581,7 +590,32 @@ export class PCAPNGInterfaceDescriptionBlock extends PCAPNGSection {
 				}
 			}
 		}
-		return [arr];
+		return arr;
+	}
+	
+	get getProperties(): Node[] {
+		const decoder = new TextDecoder('utf-8');
+
+		let e = new Node("Interface Description Block", ``, vscode.TreeItemCollapsibleState.Collapsed);
+		if(this.options !== undefined) {
+			this.options.forEach( o => {
+				switch(o.code) {
+					case 1:
+						e.children.push(new Node(`Comment`, `${decoder.decode(o.value)}`));
+						break;
+					case 2:
+						e.children.push(new Node(`Name`, `${decoder.decode(o.value)}`));
+						break;
+					default:
+						e.children.push(new Node(`Option ${o.code}`, `Unknown`));
+				}
+			});
+		};
+		
+		e.children.push(new Node(`Interface ID`, `${this.Name} (${this.interfaceID})`));
+		e.children.push(new Node(`Link Type`, `${getLinkName(this.linkType)} (${this.linkType})`));
+		
+		return [e];
 	}
 }
 
@@ -612,9 +646,9 @@ class PCAPNGOption {
 export class PCAPNGGenericBlock extends PCAPNGSection {
 	data: GenericPacket;
 
-	constructor(dv: DataView, header: PCAPNGSectionHeaderBlock) {
-		super(dv, header.le);
-		this.data = new GenericPacket(new DataView(dv.buffer, dv.byteOffset + 8, this.blockLength - 12));
+	constructor(dv: DataView, fc: FileContext) {
+		super(dv, fc);
+		this.data = new GenericPacket(new DataView(dv.buffer, dv.byteOffset + 8, this.blockLength - 12), fc);
 		
 	}
 
@@ -624,45 +658,44 @@ export class PCAPNGGenericBlock extends PCAPNGSection {
 		return `Block Type ${this.blockType} (${this.blockLength} bytes): ${this.data.toString}`;
 	}
 
-	get getProperties(): Array<any> {
-		const arr: Array<any> = [
-			`Block Type ${this.blockType}`,
-			`Block Length: ${this.blockLength}`
-		];
-
-		return [arr, this.data.getProperties];
+	get getProperties(): Node[] {
+		const elements: Node[] = [];
+		elements.concat( 
+			new Node("Block Type", `${this.blockType}`),
+			new Node("Block Length", `${this.blockLength}`),
+			this.data.getProperties
+		);
+		return elements;
 	}
 }
 
 export class PCAPNGEnhancedPacketBlock extends PCAPNGSection {
 	data: GenericPacket;
-	private _header: PCAPNGSectionHeaderBlock;
 
-	constructor(dv: DataView, header: PCAPNGSectionHeaderBlock) {
-		super(dv, header.le);
-		this._header = header;
-
-		this.data = Section.processPayload(header.interfaces[this.interfaceID].linkType, new DataView(dv.buffer, dv.byteOffset + 28, this.capturedLength));
+	constructor(dv: DataView, fc: FileContext) {
+		super(dv, fc);
+		const header = fc.header as PCAPNGSectionHeaderBlock;
+		this.data = Section.processPayload(header.interfaces[this.interfaceID].linkType, new DataView(dv.buffer, dv.byteOffset + 28, this.capturedLength), fc);
 	}
 
 	get interfaceID() {
-		return this._packet.getUint32(8, this.le);
+		return this._packet.getUint32(8, this.fc.le);
 	}
 
 	get tsHigh() {
-		return this._packet.getUint32(12, this.le);
+		return this._packet.getUint32(12, this.fc.le);
 	}
 
 	get tsLow() {
-		return this._packet.getUint32(16, this.le);
+		return this._packet.getUint32(16, this.fc.le);
 	}
 
 	get capturedLength() {
-		return this._packet.getUint32(20, this.le);
+		return this._packet.getUint32(20, this.fc.le);
 	}
 
 	get originalLength() {
-		return this._packet.getUint32(24, this.le);
+		return this._packet.getUint32(24, this.fc.le);
 	}
 
 	get optionStartOffset():number {
@@ -694,16 +727,16 @@ export class PCAPNGEnhancedPacketBlock extends PCAPNGSection {
 						optionsText += `opt_comment ${decoder.decode(this.options[i].value)}`;
 						break;
 					case 2:
-						optionsText += `epb_flags ${this.options[i].value.getUint32(0, this.le)}`;
+						optionsText += `epb_flags ${this.options[i].value.getUint32(0, this.fc.le)}`;
 						break;
 					case 4:
-						optionsText += `epb_dropcount ${this.options[i].value.getBigUint64(0, this.le)}`;
+						optionsText += `epb_dropcount ${this.options[i].value.getBigUint64(0, this.fc.le)}`;
 						break;
 					case 5:
-						optionsText += `epb_packetid ${this.options[i].value.getBigUint64(0, this.le)}`;
+						optionsText += `epb_packetid ${this.options[i].value.getBigUint64(0, this.fc.le)}`;
 						break;
 					case 6:
-						optionsText += `epb_queue ${this.options[i].value.getUint32(0, this.le)}`;
+						optionsText += `epb_queue ${this.options[i].value.getUint32(0, this.fc.le)}`;
 						break;
 
 					default:
@@ -714,13 +747,18 @@ export class PCAPNGEnhancedPacketBlock extends PCAPNGSection {
 		return `${this.timestamp}: ${this.data.toString}`;
 	}
 
-	get getProperties(): Array<any> {
-		const arr: Array<any> = [
-			`*Enhanced Packet Block: ${this.originalLength} bytes on wire, ${this.capturedLength} bytes captured`,
-			`Interface ID: ${this._header.interfaces[this.interfaceID].Name} (${this.interfaceID})`
-		];
+	get getProperties(): Node[] {
+		const elements: Node[] = [];
+		const header = this.fc.header as PCAPNGSectionHeaderBlock;
+		let e = new Node("Enhanced Packet Block", `${this.originalLength} bytes on wire, ${this.capturedLength} bytes captured`, vscode.TreeItemCollapsibleState.Collapsed);
+		e.children.push(new Node("Interface ID", `${header.interfaces[this.interfaceID].Name} (${this.interfaceID})`));
+		elements.push(e);
+		return elements.concat(this.data.getProperties);
+	}
 
-		return [arr, this.data.getProperties];
+		
+	get packetStartOffset():number {
+		return this.data.packet.byteOffset;
 	}
 
 	get getHex(): string {
@@ -742,10 +780,10 @@ export class PCAPNGEnhancedPacketBlock extends PCAPNGSection {
 export class PCAPNGSimplePacketBlock extends PCAPNGSection {
 	data: GenericPacket;
 
-	constructor(dv: DataView, header: PCAPNGSectionHeaderBlock) {
-		super(dv, header.le);
-	
-		this.data = Section.processPayload(header.interfaces[0].linkType, new DataView(dv.buffer, dv.byteOffset + 12, this.capturedLength));
+	constructor(dv: DataView, fc: FileContext) {
+		super(dv, fc);
+		const header = fc.header as PCAPNGSectionHeaderBlock;
+		this.data = Section.processPayload(header.interfaces[0].linkType, new DataView(dv.buffer, dv.byteOffset + 12, this.capturedLength), fc);
 	}
 
 	get capturedLength() {
@@ -753,7 +791,7 @@ export class PCAPNGSimplePacketBlock extends PCAPNGSection {
 	}
 
 	get originalLength() {
-		return this._packet.getUint32(8, this.le);
+		return this._packet.getUint32(8, this.fc.le);
 	}
 
 	get optionStartOffset():number {
@@ -768,13 +806,17 @@ export class PCAPNGSimplePacketBlock extends PCAPNGSection {
 		return `${this.data.toString}`;
 	}
 
-	get getProperties(): Array<any> {
-		const arr: Array<any> = [
-			`*Simple Packet Block: ${this.originalLength} bytes on wire, ${this.capturedLength} bytes captured`,
-			`Interface ID: 0`
-		];
+	get getProperties(): Node[] {
+		const elements: Node[] = [];
+		let e = new Node("Simple Packet Block", `${this.originalLength} bytes on wire, ${this.capturedLength} bytes captured`, vscode.TreeItemCollapsibleState.Collapsed);
+		e.children.push(new Node("Interface ID", `0`));
+		elements.push(e);
+		return elements.concat(this.data.getProperties);
+	}
 
-		return [arr, this.data.getProperties];
+		
+	get packetStartOffset():number {
+		return this.data.packet.byteOffset;
 	}
 
 	get getHex(): string {
@@ -794,20 +836,20 @@ export class PCAPNGSimplePacketBlock extends PCAPNGSection {
 
 
 class PCAPNGInterfaceStatisticsBlock extends PCAPNGSection {
-	constructor(dv: DataView, header: PCAPNGSectionHeaderBlock) {
-		super(dv, header.le);
+	constructor(dv: DataView, fc: FileContext) {
+		super(dv, fc);
 	}
 
 	get interfaceID() {
-		return this._packet.getUint32(8, this.le);
+		return this._packet.getUint32(8, this.fc.le);
 	}
 
 	get tsHigh() {
-		return this._packet.getUint32(12, this.le);
+		return this._packet.getUint32(12, this.fc.le);
 	}
 
 	get tsLow() {
-		return this._packet.getUint32(16, this.le);
+		return this._packet.getUint32(16, this.fc.le);
 	}
 
 	get optionStartOffset():number { return 20; };
@@ -822,25 +864,25 @@ class PCAPNGInterfaceStatisticsBlock extends PCAPNGSection {
 						optionsText += `opt_comment ${decoder.decode(this.options[i].value)}`;
 						break;
 					case 2:
-						optionsText += `isb_starttime ${this.options[i].value.getBigUint64(0, this.le)}`;
+						optionsText += `isb_starttime ${this.options[i].value.getBigUint64(0, this.fc.le)}`;
 						break;
 					case 3:
-						optionsText += `isb_endtime ${this.options[i].value.getBigUint64(0, this.le)}`;
+						optionsText += `isb_endtime ${this.options[i].value.getBigUint64(0, this.fc.le)}`;
 						break;
 					case 4:
-						optionsText += `isb_ifrecv ${this.options[i].value.getBigUint64(0, this.le)}`;
+						optionsText += `isb_ifrecv ${this.options[i].value.getBigUint64(0, this.fc.le)}`;
 						break;
 					case 5:
-						optionsText += `isb_ifdrop ${this.options[i].value.getBigUint64(0, this.le)}`;
+						optionsText += `isb_ifdrop ${this.options[i].value.getBigUint64(0, this.fc.le)}`;
 						break;
 					case 6:
-						optionsText += `isb_filteraccept ${this.options[i].value.getBigUint64(0, this.le)}`;
+						optionsText += `isb_filteraccept ${this.options[i].value.getBigUint64(0, this.fc.le)}`;
 						break;
 					case 7:
-						optionsText += `isb_osdrop ${this.options[i].value.getBigUint64(0, this.le)}`;
+						optionsText += `isb_osdrop ${this.options[i].value.getBigUint64(0, this.fc.le)}`;
 						break;
 					case 8:
-						optionsText += `isb_usrdeliv ${this.options[i].value.getBigUint64(0, this.le)}`;
+						optionsText += `isb_usrdeliv ${this.options[i].value.getBigUint64(0, this.fc.le)}`;
 						break;
 					default:
 						optionsText += `opt_unknown ${this.options[i].code}`;
@@ -854,14 +896,14 @@ class PCAPNGInterfaceStatisticsBlock extends PCAPNGSection {
 export class PCAPNGSectionHeaderBlock extends PCAPNGSection {
 	public interfaceCount: number = 0;
 	public interfaces: PCAPNGInterfaceDescriptionBlock[] = [];
+	public states: PacketState[] = [];
 
-	constructor(dv: DataView) {
-		super(dv, true);
-		this._le = this._packet.getUint32(8, true) === 0x1A2B3C4D;
+	constructor(dv: DataView, fc: FileContext) {
+		super(dv, fc);
 	}
 
-	get fileType() {
-		return 2;
+	get le():boolean {
+		return this._packet.getUint32(8, true) === 0x1A2B3C4D;
 	}
 
 	get optionStartOffset():number { return 24; };
@@ -890,34 +932,34 @@ export class PCAPNGSectionHeaderBlock extends PCAPNGSection {
 		return `Section Header${optionsText.substring(0, optionsText.length-2)}`;
 	}
 	
-	get getProperties(): Array<any> {
-		const arr: Array<any> = [
-			"*Section Header Block"
-		];
-		let optionsText = "";
+	get getProperties(): Node[] {
 		const decoder = new TextDecoder('utf-8');
+		const elements: Node[] = [];
+
+		let e = new Node("Section Header Block", "", vscode.TreeItemCollapsibleState.Collapsed);
+
 		if(this.options !== undefined) {
-			for(let i = 0; i < this.options?.length; i++) {
-				switch(this.options[i].code) {
+			this.options.forEach( o => {
+				switch(o.code) {
 					case 1:
-						arr.push(`Comment: ${decoder.decode(this.options[i].value)}`);
+						e.children.push(new Node(`Comment`, `${decoder.decode(o.value)}`));
 						break;
 					case 2:
-						arr.push(`Hardware: ${decoder.decode(this.options[i].value)}`);
+						e.children.push(new Node(`Hardware`, `${decoder.decode(o.value)}`));
 						break;
 					case 3:
-						arr.push(`OS: ${decoder.decode(this.options[i].value)}`);
+						e.children.push(new Node(`OS`, `${decoder.decode(o.value)}`));
 						break;
 					case 4:
-						arr.push(`User Application: ${decoder.decode(this.options[i].value)}`);
+						e.children.push(new Node(`User Application`, `${decoder.decode(o.value)}`));
 						break;
 					default:
-						arr.push(`Option ${this.options[i].code}: Unknown`);
+						e.children.push(new Node(`Option ${o.code}`, `Unknown`));
 				}
-			}
+			});
 		}
-		return [arr];
-	}
-	
 
+		elements.push(e);
+		return elements;
+	}
 }

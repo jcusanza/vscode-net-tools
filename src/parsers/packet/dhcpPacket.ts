@@ -1,19 +1,64 @@
+import * as vscode from 'vscode';
+import { Node } from "../../packetdetailstree";
 import { GenericPacket } from "./genericPacket";
+import { FileContext } from "../file/FileContext";
 
 export class DHCPPacket extends GenericPacket {
+	public static readonly Name = "DHCP";
+
+    private static readonly _OpOffset = 0;
+    private static readonly _hTypeOffset = 1;
+    private static readonly _hLenOffset = 2;
+    private static readonly _hopsOffset = 3;
+    private static readonly _xidOffset = 4;
+    private static readonly _secsOffset = 8;
+    private static readonly _flagsOffset = 10;
+    private static readonly _ciaddrOffset = 12;
+    private static readonly _yiaddrOffset = 16;
+    private static readonly _siaddrOffset = 20;
+    private static readonly _giaddrOffset = 24;
+    private static readonly _chaddrOffset = 28;
+    private static readonly _snameOffset = 44;
+    private static readonly _fileOffset = 108;
+
+    private static readonly _OpLength = 1;
+    private static readonly _hTypeLength = 1;
+    private static readonly _hLenLength = 1;
+    private static readonly _hopsLength = 1;
+    private static readonly _xidLength = 4;
+    private static readonly _secsLength = 2;
+    private static readonly _flagsLength = 2;
+    private static readonly _ciaddrLength = 4;
+    private static readonly _yiaddrLength = 4;
+    private static readonly _siaddrLength = 4;
+    private static readonly _giaddrLength = 4;
+    private static readonly _chaddrLength = 16;
+    private static readonly _snameLength = 64;
+    private static readonly _fileLength = 128;
+
     packet: DataView;
 
-	constructor(packet: DataView) {
-		super(packet);
+	constructor(packet: DataView, fc:FileContext) {
+		super(packet, fc);
 		this.packet = packet;
+
+		this.registerProtocol(DHCPPacket.Name, fc);
 	}
 
-	get op() {
-		return this.packet.getUint8(0);
+    get op() {
+		return this.packet.getUint8(DHCPPacket._OpOffset);
 	}
+
+    get opString() {
+		if(this.op === 1) {
+			return `Boot Request`;
+		} else {
+			return `Boot Reply`;
+		}
+    }
 
 	get htype() {
-		return this.packet.getUint8(1);
+		return this.packet.getUint8(DHCPPacket._hTypeOffset);
 	}
 
 	get htypeString() {
@@ -66,65 +111,71 @@ export class DHCPPacket extends GenericPacket {
 	}
 
     get hlen() {
-		return this.packet.getUint8(2);
+		return this.packet.getUint8(DHCPPacket._hLenOffset);
 	}
 
     get hops() {
-		return this.packet.getUint8(3);
+		return this.packet.getUint8(DHCPPacket._hopsOffset);
 	}
 
 	get xid() {
-		return this.packet.getUint32(4);
+		return this.packet.getUint32(DHCPPacket._xidOffset);
 	}
 
     get secs() {
-		return this.packet.getUint16(8);
+		return this.packet.getUint16(DHCPPacket._secsOffset);
 	}
 
     get flags() {
-		return this.packet.getUint16(10);
+		return this.packet.getUint16(DHCPPacket._flagsOffset);
 	}
-
+    get flagsString() {
+        if(this.flags === 0x8000) {
+			return `Broadcast`;
+		} else {
+			return `Unicast`;
+		}
+    }
     get ciaddr() {
 		let ret = "";
-		ret += this.packet.getUint8(12) + ".";
-		ret += this.packet.getUint8(13) + ".";
-		ret += this.packet.getUint8(14) + ".";
-		ret += this.packet.getUint8(15);
+		ret += this.packet.getUint8(DHCPPacket._ciaddrOffset) + ".";
+		ret += this.packet.getUint8(DHCPPacket._ciaddrOffset+1) + ".";
+		ret += this.packet.getUint8(DHCPPacket._ciaddrOffset+2) + ".";
+		ret += this.packet.getUint8(DHCPPacket._ciaddrOffset+3);
 		return ret;
 	}
     
     get yiaddr() {
 		let ret = "";
-		ret += this.packet.getUint8(16) + ".";
-		ret += this.packet.getUint8(17) + ".";
-		ret += this.packet.getUint8(18) + ".";
-		ret += this.packet.getUint8(19);
+		ret += this.packet.getUint8(DHCPPacket._yiaddrOffset) + ".";
+		ret += this.packet.getUint8(DHCPPacket._yiaddrOffset+1) + ".";
+		ret += this.packet.getUint8(DHCPPacket._yiaddrOffset+2) + ".";
+		ret += this.packet.getUint8(DHCPPacket._yiaddrOffset+3);
 		return ret;
 	}
 
     get siaddr() {
 		let ret = "";
-		ret += this.packet.getUint8(20) + ".";
-		ret += this.packet.getUint8(21) + ".";
-		ret += this.packet.getUint8(22) + ".";
-		ret += this.packet.getUint8(23);
+		ret += this.packet.getUint8(DHCPPacket._siaddrOffset) + ".";
+		ret += this.packet.getUint8(DHCPPacket._siaddrOffset+1) + ".";
+		ret += this.packet.getUint8(DHCPPacket._siaddrOffset+2) + ".";
+		ret += this.packet.getUint8(DHCPPacket._siaddrOffset+3);
 		return ret;
 	}
 
     get giaddr() {
 		let ret = "";
-		ret += this.packet.getUint8(24) + ".";
-		ret += this.packet.getUint8(25) + ".";
-		ret += this.packet.getUint8(26) + ".";
-		ret += this.packet.getUint8(27);
+		ret += this.packet.getUint8(DHCPPacket._giaddrOffset) + ".";
+		ret += this.packet.getUint8(DHCPPacket._giaddrOffset+1) + ".";
+		ret += this.packet.getUint8(DHCPPacket._giaddrOffset+2) + ".";
+		ret += this.packet.getUint8(DHCPPacket._giaddrOffset+3);
 		return ret;
 	}
 
     get chaddr() {
 		let ret = "";
         for(let i = 0; i < this.hlen; i++) {
-            ret += this.packet.getUint8(28 + i).toString(16).padStart(2, "0");
+            ret += this.packet.getUint8(DHCPPacket._chaddrOffset + i).toString(16).padStart(2, "0");
             if(i !== this.hlen-1) {
                 ret += ":";
             }
@@ -134,13 +185,13 @@ export class DHCPPacket extends GenericPacket {
 
 	get sname() {
 		const decoder = new TextDecoder(`utf-8`);
-		const sname = decoder.decode(new DataView(this.packet.buffer, this.packet.byteOffset + 44, 64)).split(`\0`)[0];
+		const sname = decoder.decode(new DataView(this.packet.buffer, this.packet.byteOffset + DHCPPacket._snameOffset, DHCPPacket._snameLength)).split(`\0`)[0];
 		return sname;
 	}
 
 	get file() {
 		const decoder = new TextDecoder(`utf-8`);
-		const file = decoder.decode(new DataView(this.packet.buffer, this.packet.byteOffset + 108, 128)).split(`\0`)[0];
+		const file = decoder.decode(new DataView(this.packet.buffer, this.packet.byteOffset + DHCPPacket._fileOffset, DHCPPacket._fileLength)).split(`\0`)[0];
 		return file;
 	}
 
@@ -177,40 +228,37 @@ export class DHCPPacket extends GenericPacket {
 		return `DHCP ${this.messageType} - Transaction ID 0x${this.xid.toString(16)}`;
 	}
 
-	get getProperties(): Array<any> {
-		const arr: Array<any> = [];
-		arr.push("Dynamic Host Configuration Protocol");
-		if(this.op === 1) {
-			arr.push(`Message type: Boot Request (${this.op})`);
-		} else {
-			arr.push(`Message type: Boot Reply (${this.op})`);
-		}
-		arr.push(`Hardware type: ${this.htypeString} (0x${this.op.toString(16)})`);
-		arr.push(`Hardware address length: ${this.hlen}`);
-		arr.push(`Hops: ${this.hops}`);
-		arr.push(`Transaction ID: ${this.xid}`);
-		arr.push(`Seconds elapsed: ${this.secs}`);
-		if(this.flags === 0x8000) {
-			arr.push(`Bootp flags: 0x${this.flags.toString(16)} (Broadcast)`);
-		} else {
-			arr.push(`Bootp flags: 0x${this.flags.toString(16)} (Unicast)`);
-		}
-		arr.push(`Client IP address: ${this.ciaddr}`);
-		arr.push(`Your (Client) IP address: ${this.yiaddr}`);
-		arr.push(`Next server IP address: ${this.siaddr}`);
-		arr.push(`Relay agent IP address: ${this.giaddr}`);
-		arr.push(`Client MAC address: ${this.chaddr}`);
-		arr.push(`Server host name${this.sname.length ? ": " + this.sname : " not given"}`);
-		arr.push(`Boot file name${this.file.length ? ": " + this.file : " not given"}`);
-		if(this.options.length > 0) {
-			const optArr: Array<any> = [];
-			optArr.push(`Options`);
+    get getProperties(): Node[] {
+		const byteOffset = this.packet.byteOffset;
+		const defaultState = vscode.TreeItemCollapsibleState.None;
+
+        const element = new Node("Dynamic Host Configuration Protocol", ``, vscode.TreeItemCollapsibleState.Collapsed, byteOffset, this.packet.buffer.byteLength - byteOffset);
+        element.children.push(new Node("Message type", `${this.opString} (${this.op})`, defaultState, byteOffset + DHCPPacket._OpOffset, DHCPPacket._OpLength));
+        element.children.push(new Node("Hardware type", `${this.htypeString} (0x${this.op.toString(16)})`, defaultState, byteOffset + DHCPPacket._hTypeOffset, DHCPPacket._hTypeLength));
+        element.children.push(new Node("Hardware address length", `${this.hlen}`, defaultState, byteOffset + DHCPPacket._hLenOffset, DHCPPacket._hLenLength));
+        element.children.push(new Node("Hops", `${this.hops}`, defaultState, byteOffset + DHCPPacket._hopsOffset, DHCPPacket._hopsLength));
+        element.children.push(new Node("Transaction ID", `${this.xid}`, defaultState, byteOffset + DHCPPacket._xidOffset, DHCPPacket._xidLength));
+        element.children.push(new Node("Seconds elapsed", `${this.secs}`, defaultState, byteOffset + DHCPPacket._secsOffset, DHCPPacket._secsLength));
+        element.children.push(new Node("Bootp flags", `0x${this.flags.toString(16)} (${this.flagsString})`, defaultState, byteOffset + DHCPPacket._flagsOffset, DHCPPacket._flagsLength));
+        element.children.push(new Node("Client IP address", `${this.ciaddr}`, defaultState, byteOffset + DHCPPacket._ciaddrOffset, DHCPPacket._ciaddrLength));
+        element.children.push(new Node("Your (Client) IP address", `${this.yiaddr}`, defaultState, byteOffset + DHCPPacket._yiaddrOffset, DHCPPacket._yiaddrLength));
+        element.children.push(new Node("Next server IP address", `${this.siaddr}`, defaultState, byteOffset + DHCPPacket._siaddrOffset, DHCPPacket._siaddrLength));
+        element.children.push(new Node("Relay agent IP address", `${this.giaddr}`, defaultState, byteOffset + DHCPPacket._giaddrOffset, DHCPPacket._giaddrLength));
+        element.children.push(new Node("Client MAC address", `${this.chaddr}`, defaultState, byteOffset + DHCPPacket._chaddrOffset, DHCPPacket._chaddrLength));
+        element.children.push(new Node("Server host name", `${this.sname.length ? this.sname : "Not given"}`, defaultState, byteOffset + DHCPPacket._snameOffset, DHCPPacket._snameLength));
+        element.children.push(new Node("Boot file name", `${this.file.length ? this.file : "Not given"}`, defaultState, byteOffset + DHCPPacket._fileOffset, DHCPPacket._fileLength));
+
+        if(this.options.length > 0) {
+            let offset = byteOffset + DHCPPacket._fileOffset + DHCPPacket._fileLength + 4;  //add 4 bytes for the DHCP magic cookie 
+			let e2 = new Node("Options", ``, vscode.TreeItemCollapsibleState.Collapsed, offset, this.packet.buffer.byteLength - offset);
 			this.options.forEach(item => {
-				optArr.push(item.toString);
+				e2.children.push(new Node(item.toString, ``, defaultState, offset, item.length + 2));
+                offset += item.length + 2;
 			});
-			arr.push(optArr);
+		    element.children.push(e2);
 		}
-		return arr;
+
+        return [element];
 	}
 }
 

@@ -1,49 +1,75 @@
 import { ARPPacket } from "./arpPacket";
 import { GenericPacket } from "./genericPacket";
+import { FileContext } from "../file/FileContext";
 import { IPv4Packet } from "./ipv4Packet";
 import { IPv6Packet } from "./ipv6Packet";
 import { vlanPacket } from "./vlanPacket";
 import { pppoedPacket, pppoePacket } from "./pppoePacket";
+import { Node } from "../../packetdetailstree";
+import * as vscode from 'vscode';
 
 export class EthernetPacket extends GenericPacket {
 	innerPacket: GenericPacket;
 
-	static processPayload(proto: number, payload: DataView): GenericPacket {
+	static namePayload(proto:number) {
 		switch (proto) {
-			case 0x800:
-				if(payload.getUint8(0) >> 4 === 4) {
-					return new IPv4Packet(payload);
-				} else if(payload.getUint8(0) >> 4 === 6) {
-					return new IPv6Packet(payload);
-				} else {
-					return new GenericPacket(payload);
-				}
-				break;
-			case 0x806:
-				return new ARPPacket(payload);
-				break;
-			case 0x8100:
-				return new vlanPacket(payload);
-				break;
-			case 0x86dd:
-				return new IPv6Packet(payload);
-				break;
-			case 0x8863:
-				return new pppoedPacket(payload);
-				break;
-			case 0x8864:
-				return new pppoePacket(payload);
-				break;
-			default:
-				return new GenericPacket(payload);
+			case 0x0800: return `IPv4`;
+			case 0x0806: return `ARP`;
+			case 0x8100: return `802.1Q Virtual LAN`;
+			case 0x86dd: return `IPv6`;
+			case 0x8863: return `PPPoE Discovery`;
+			case 0x8864: return `PPPoE`;
+			default: return `Unknown`;
 		}
 	}
 
-	constructor(packet: DataView) {
-		super(packet);
-		this.innerPacket = EthernetPacket.processPayload(this.proto, new DataView(packet.buffer, packet.byteOffset + 14, packet.byteLength - 14));
+	static processPayload(proto: number, payload: DataView, fc:FileContext): GenericPacket {
+		if (proto <= 0x5DC) {
+			const generic =  new GenericPacket(payload, fc);
+			generic.registerProtocol(`IEEE802.3`, fc);
+			return generic;
+		}
+
+		switch (proto) {
+			case 0x800:
+				if(payload.getUint8(0) >> 4 === 4) {
+					return new IPv4Packet(payload, fc);
+				} else if(payload.getUint8(0) >> 4 === 6) {
+					return new IPv6Packet(payload, fc);
+				} else {
+					return new GenericPacket(payload, fc);
+				}
+				break;
+			case 0x806:
+				return new ARPPacket(payload, fc);
+				break;
+			case 0x8100:
+				return new vlanPacket(payload, fc);
+				break;
+			case 0x86dd:
+				return new IPv6Packet(payload, fc);
+				break;
+			case 0x8863:
+				return new pppoedPacket(payload, fc);
+				break;
+			case 0x8864:
+				return new pppoePacket(payload, fc);
+				break;
+			default:
+				const generic =  new GenericPacket(payload, fc);
+				generic.registerProtocol(`Ethertype #${proto} (0x${proto.toString(16).padStart(4, "0")})`, fc);
+				return generic;
+		}
 	}
-	
+
+	constructor(packet: DataView, fc:FileContext) {
+		super(packet, fc);
+		fc.headers.push(this);
+		this.innerPacket = EthernetPacket.processPayload(this.proto, new DataView(packet.buffer, packet.byteOffset + 14, packet.byteLength - 14), fc);
+		this.registerAddress(this.dstMAC, fc);
+		this.registerAddress(this.srcMAC, fc);
+	}
+
 	get dstMAC() {
 		//00:11:22:33:44:55
 		let ret = "";
@@ -53,7 +79,7 @@ export class EthernetPacket extends GenericPacket {
 		ret += this.packet.getUint8(3).toString(16).padStart(2, "0") + ":";
 		ret += this.packet.getUint8(4).toString(16).padStart(2, "0") + ":";
 		ret += this.packet.getUint8(5).toString(16).padStart(2, "0");
-		return ret;
+		return ret.toUpperCase();
 	}
 
 	get srcMAC() {
@@ -64,11 +90,15 @@ export class EthernetPacket extends GenericPacket {
 		ret += this.packet.getUint8(9).toString(16).padStart(2, "0") + ":";
 		ret += this.packet.getUint8(10).toString(16).padStart(2, "0") + ":";
 		ret += this.packet.getUint8(11).toString(16).padStart(2, "0");
-		return ret;
+		return ret.toUpperCase();
 	}
 
 	get proto() {
 		return this.packet.getUint16(12);
+	}
+
+	get protoName():string {
+		return EthernetPacket.namePayload(this.proto);
 	}
 
 	get toString() {
@@ -76,41 +106,14 @@ export class EthernetPacket extends GenericPacket {
 		return `${this.srcMAC} > ${this.dstMAC} (0x${this.proto.toString(16).padStart(4, "0")}): ${this.innerPacket.toString}`;
 	}
 
-	get getProperties(): Array<any> {
-		const arr: Array<any> = [];
-		arr.push(`*Ethernet II, Src: ${this.srcMAC}, Dst: ${this.dstMAC}`);
-		arr.push(`Source Address: ${this.srcMAC}`);
-		arr.push(`Destination Address: ${this.dstMAC}`);
-		switch (this.proto) {
-			case 0x800:
-				if(this.packet.getUint8(14) >> 4 === 4) {
-					arr.push(`Type: IPv4 (0x${this.proto.toString(16)})`);
-				} else if(this.packet.getUint8(14) >> 4 === 6) {
-					arr.push(`Type: IPv6 (0x${this.proto.toString(16)})`);
-				} else {
-					arr.push(`Type: Unknown (0x${this.proto.toString(16)})`);
-				}
-				break;
+	get getProperties(): Node[] {
+		const elements: Node[] = [];
+		let e = new Node("Ethernet II", `Src: ${this.srcMAC}, Dst: ${this.dstMAC}`, vscode.TreeItemCollapsibleState.Collapsed, this.packet.byteOffset, 14);
+		e.children.push(new Node("Source Address", this.srcMAC, vscode.TreeItemCollapsibleState.None, this.packet.byteOffset+6, 6));
+		e.children.push(new Node("Destination Address", this.dstMAC, vscode.TreeItemCollapsibleState.None, this.packet.byteOffset, 6));
+		e.children.push(new Node("Type", `${this.protoName} (0x${this.proto.toString(16)})`, vscode.TreeItemCollapsibleState.None, this.packet.byteOffset + 12, 2));
 
-			case 0x806:
-				arr.push(`Type: ARP (0x${this.proto.toString(16)})`);
-				break;
-			case 0x8100:
-				arr.push(`Type: 802.1Q Virtual LAN (0x${this.proto.toString(16)})`);
-				break;
-			case 0x86dd:
-				arr.push(`Type: IPv6 (0x${this.proto.toString(16)})`);
-				break;
-			case 0x8863:
-				arr.push(`Type: PPPoE Discovery (0x${this.proto.toString(16)})`);
-				break;
-			case 0x8864:
-				arr.push(`Type: PPPoE (0x${this.proto.toString(16)})`);
-				break;
-			default:
-				arr.push(`Type: Unknown (0x${this.proto.toString(16)})`);
-		}
-
-		return [arr, this.innerPacket.getProperties];
+		elements.push(e);
+		return elements.concat(this.innerPacket.getProperties);
 	}
 }

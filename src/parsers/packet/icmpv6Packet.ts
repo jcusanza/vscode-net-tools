@@ -1,12 +1,18 @@
+import * as vscode from 'vscode';
+import { Node } from "../../packetdetailstree";
 import { GenericPacket } from "./genericPacket";
+import { FileContext } from "../file/FileContext";
 import { Address6 } from "ip-address";
 
 export class ICMPv6Packet extends GenericPacket {
+    public static readonly Name = "ICMPv6";
 	packet: DataView;
 
-	constructor(packet: DataView) {
-		super(packet);
+	constructor(packet: DataView, fc:FileContext) {
+		super(packet, fc);
 		this.packet = packet;
+        this.registerProtocol(ICMPv6Packet.Name, fc);
+
 	}
 
     get message(): ICMPv6Message {
@@ -23,6 +29,14 @@ export class ICMPv6Packet extends GenericPacket {
 }
 
 class ICMPv6Message {
+	protected static readonly _TypeOffset = 0;
+	protected static readonly _CodeOffset = 1;
+	protected static readonly _ChecksumOffset = 2;
+
+	protected static readonly _TypeLength = 1;
+	protected static readonly _CodeLength = 1;
+	protected static readonly _ChecksumLength = 2;
+
     packet: DataView;
 
     constructor(dv:DataView) {
@@ -38,24 +52,27 @@ class ICMPv6Message {
     }
 
     get type() {
-        return this.packet.getUint8(0);
+        return this.packet.getUint8(ICMPv6Message._TypeOffset);
     }
 
     get code() {
-        return this.packet.getUint8(1);
+        return this.packet.getUint8(ICMPv6Message._CodeOffset);
     }
 
     get checksum() {
-        return this.packet.getUint16(2);
+        return this.packet.getUint16(ICMPv6Message._ChecksumOffset);
     }
-    
-    get getProperties(): Array<any> {
-		const arr: Array<any> = [];
-		arr.push("Internet Control Message Protocol v6");
-		arr.push(`Type: Unknown Message Type (${this.type})`);
-		arr.push(`Code: (${this.code})`);
-		arr.push(`Checksum: (0x${this.checksum.toString(16)})`);
-		return arr;
+
+    get getProperties(): Node[] {
+        const byteOffset = this.packet.byteOffset;
+		const defaultState = vscode.TreeItemCollapsibleState.None;
+
+        const element = new Node("Internet Control Message Protocol v6", ``, vscode.TreeItemCollapsibleState.Collapsed, byteOffset, this.packet.byteLength);
+		element.children.push(new Node("Type", `Unknown (${this.type})`, defaultState, byteOffset + ICMPv6Message._TypeOffset, ICMPv6Message._TypeLength));
+		element.children.push(new Node("Code", `${this.code}`, defaultState, byteOffset + ICMPv6Message._CodeOffset, ICMPv6Message._CodeLength));
+        element.children.push(new Node("Checksum", `0x${this.checksum.toString(16)}`, defaultState, byteOffset + ICMPv6Message._ChecksumOffset, ICMPv6Message._ChecksumLength));
+
+		return [element];
 	}
 }
 
@@ -92,10 +109,6 @@ class ICMPv6Error extends ICMPv6Message {
 
 class ICMPv6Info extends ICMPv6Message {
 
-    constructor(dv: DataView) {
-        super(dv);
-    }
-
     static create(dv:DataView): ICMPv6Info {
         switch(dv.getUint8(0)) {
             case 128:
@@ -111,36 +124,50 @@ class ICMPv6Info extends ICMPv6Message {
         }
     }
 
+    constructor(dv: DataView) {
+        super(dv);
+    }
+
     get toString() {
         return `Unknown Info Message (${this.type})`;
     }
 
-    get getProperties(): Array<any> {
-		const arr: Array<any> = [];
-		arr.push("Internet Control Message Protocol v6");
-		arr.push(`Type: Neighbor Solicitation (${this.type})`);
-		arr.push(`Code: (${this.code})`);
-		return arr;
+    get getProperties(): Node[] {
+        const byteOffset = this.packet.byteOffset;
+		const defaultState = vscode.TreeItemCollapsibleState.None;
+
+        const element = new Node("Internet Control Message Protocol v6", ``, vscode.TreeItemCollapsibleState.Collapsed, byteOffset, this.packet.byteLength);
+		element.children.push(new Node("Type", `Neighbor Solicitation (${this.type})`, defaultState, byteOffset + ICMPv6Message._TypeOffset, ICMPv6Message._TypeLength));
+		element.children.push(new Node("Code", `${this.code}`, defaultState, byteOffset + ICMPv6Message._CodeOffset, ICMPv6Message._CodeLength));
+        element.children.push(new Node("Checksum", `0x${this.checksum.toString(16)}`, defaultState, byteOffset + ICMPv6Message._ChecksumOffset, ICMPv6Message._ChecksumLength));
+
+		return [element];
 	}
 }
 
 class ICMPv6EchoRequest extends ICMPv6Info {
+	protected static readonly _IdentifierOffset = 4;
+	protected static readonly _SequenceNumOffset = 6;
+	protected static readonly _DataOffset = 8;
+
+	protected static readonly _IdentifierLength = 2;
+	protected static readonly _SequenceNumLength = 2;
 
     constructor(dv: DataView) {
         super(dv);
     }
 
     get identifier() {
-        return this.packet.getUint16(4);
+        return this.packet.getUint16(ICMPv6EchoRequest._IdentifierOffset);
     }
 
     get sequenceNum() {
-        return this.packet.getUint16(6);
+        return this.packet.getUint16(ICMPv6EchoRequest._SequenceNumOffset);
     }
 
     get data() {
         let ret = "";
-		for (let i = 8; i < this.packet.byteLength; i++) {
+		for (let i = ICMPv6EchoRequest._DataOffset; i < this.packet.byteLength; i++) {
 			ret += this.packet.getUint8(i).toString(16).padStart(2, "0");
 		}
 		return ret;
@@ -150,36 +177,44 @@ class ICMPv6EchoRequest extends ICMPv6Info {
         return `Echo Request, Identifier: ${this.code} Sequence Num: ${this.sequenceNum} Data: ${this.data}`;
     }
 
-    get getProperties(): Array<any> {
-		const arr: Array<any> = [];
-		arr.push("Internet Control Message Protocol v6");
-		arr.push(`Type: Echo Request (${this.type})`);
-		arr.push(`Code: (${this.code})`);
-		arr.push(`Checksum: (0x${this.checksum.toString(16)})`);
-		arr.push(`Identifier: (0x${this.identifier.toString(16)})`);
-        arr.push(`Sequence: (${this.sequenceNum})`);
-        arr.push(`<ul> <li> <details> <summary> Data (32 Bytes) </summary> <ul> <li> ${this.data} </li> </ul> </details> </li> </ul>`);
-		return arr;
+    get getProperties(): Node[] {
+        const byteOffset = this.packet.byteOffset;
+		const defaultState = vscode.TreeItemCollapsibleState.None;
+
+        const element = new Node("Internet Control Message Protocol v6", ``, vscode.TreeItemCollapsibleState.Collapsed, byteOffset, this.packet.byteLength);
+		element.children.push(new Node("Type", `Echo Request (${this.type})`, defaultState, byteOffset + ICMPv6Message._TypeOffset, ICMPv6Message._TypeLength));
+		element.children.push(new Node("Code", `${this.code}`, defaultState, byteOffset + ICMPv6Message._CodeOffset, ICMPv6Message._CodeLength));
+        element.children.push(new Node("Checksum", `0x${this.checksum.toString(16)}`, defaultState, byteOffset + ICMPv6Message._ChecksumOffset, ICMPv6Message._ChecksumLength));
+        element.children.push(new Node("Identifier", `0x${this.identifier.toString(16)}`, defaultState, byteOffset + ICMPv6EchoRequest._IdentifierOffset, ICMPv6EchoRequest._IdentifierLength));
+		element.children.push(new Node("Sequence", `${this.sequenceNum}`, defaultState, byteOffset + ICMPv6EchoRequest._SequenceNumOffset, ICMPv6EchoRequest._SequenceNumLength));
+        element.children.push(new Node("Data", `${this.data}`, defaultState, byteOffset + ICMPv6EchoRequest._DataOffset, this.packet.byteLength - ICMPv6EchoRequest._DataOffset));
+		return [element];
 	}
 }
 
 class ICMPv6EchoReply extends ICMPv6Info {
-    
+	protected static readonly _IdentifierOffset = 4;
+	protected static readonly _SequenceNumOffset = 6;
+	protected static readonly _DataOffset = 8;
+
+	protected static readonly _IdentifierLength = 2;
+	protected static readonly _SequenceNumLength = 2;
+
     constructor(dv: DataView) {
         super(dv);
     }
 
     get identifier() {
-        return this.packet.getUint16(4);
+        return this.packet.getUint16(ICMPv6EchoReply._IdentifierOffset);
     }
 
     get sequenceNum() {
-        return this.packet.getUint16(6);
+        return this.packet.getUint16(ICMPv6EchoReply._SequenceNumOffset);
     }
-    
+
     get data() {
         let ret = "";
-		for (let i = 8; i < this.packet.byteLength; i++) {
+		for (let i = ICMPv6EchoReply._DataOffset; i < this.packet.byteLength; i++) {
 			ret += this.packet.getUint8(i).toString(16).padStart(2, "0") + " ";
 		}
 		return ret.trimEnd();
@@ -189,44 +224,55 @@ class ICMPv6EchoReply extends ICMPv6Info {
         return `Echo Reply, Identifier: ${this.code} Sequence Num: ${this.sequenceNum} Data: ${this.data}`;
     }
 
-    get getProperties(): Array<any> {
-		const arr: Array<any> = [];
-		arr.push("Internet Control Message Protocol v6");
-		arr.push(`Type: Echo Reply (${this.type})`);
-		arr.push(`Code: (${this.code})`);
-		arr.push(`Checksum: (0x${this.checksum.toString(16)})`);
-		arr.push(`Identifier: (0x${this.identifier.toString(16)})`);
-        arr.push(`Sequence: (${this.sequenceNum})`);
-        arr.push(`<ul> <li> <details> <summary> Data (32 Bytes) </summary> <ul> <li> ${this.data} </li> </ul> </details> </li> </ul>`);
-		return arr;
+    get getProperties(): Node[] {
+        const byteOffset = this.packet.byteOffset;
+		const defaultState = vscode.TreeItemCollapsibleState.None;
+
+        const element = new Node("Internet Control Message Protocol v6", ``, vscode.TreeItemCollapsibleState.Collapsed, byteOffset, this.packet.byteLength);
+		element.children.push(new Node("Type", `Echo Reply (${this.type})`, defaultState, byteOffset + ICMPv6Message._TypeOffset, ICMPv6Message._TypeLength));
+		element.children.push(new Node("Code", `${this.code}`, defaultState, byteOffset + ICMPv6Message._CodeOffset, ICMPv6Message._CodeLength));
+        element.children.push(new Node("Checksum", `0x${this.checksum.toString(16)}`, defaultState, byteOffset + ICMPv6Message._ChecksumOffset, ICMPv6Message._ChecksumLength));
+        element.children.push(new Node("Identifier", `0x${this.identifier.toString(16)}`, defaultState, byteOffset + ICMPv6EchoReply._IdentifierOffset, ICMPv6EchoReply._IdentifierLength));
+		element.children.push(new Node("Sequence", `${this.sequenceNum}`, defaultState, byteOffset + ICMPv6EchoReply._SequenceNumOffset, ICMPv6EchoReply._SequenceNumLength));
+        element.children.push(new Node("Data", `${this.data}`, defaultState, byteOffset + ICMPv6EchoReply._DataOffset, this.packet.byteLength - ICMPv6EchoReply._DataOffset));
+		return [element];
 	}
 }
 
 class ICMPv6NeighborSolicitation extends ICMPv6Info {
-    
+    protected static readonly _ReservedOffset = 4;
+    protected static readonly _TargetAddressOffset = 8;
+	protected static readonly _OptionOffset = 24;
+
+	protected static readonly _ReservedLength = 4;
+	protected static readonly _TargetAddressLength = 16;
+	protected static readonly _OptionLength = 6;
+
     constructor(dv: DataView) {
         super(dv);
     }
 
     get targetAddress() {
-        const a = this.packet.buffer.slice(this.packet.byteOffset+8, this.packet.byteOffset+8+16);
+        const AddressOffset = this.packet.byteOffset + ICMPv6NeighborSolicitation._TargetAddressOffset;
+        const a = this.packet.buffer.slice(AddressOffset, AddressOffset+ICMPv6NeighborSolicitation._TargetAddressLength);
 		const ua = new Uint8Array(a);
 		const na = Array.from(ua);
 		return Address6.fromByteArray(na);
     }   
 
     get option() {
-        if(this.packet.byteLength <= 24) {
+        if(this.packet.byteLength <= ICMPv6NeighborSolicitation._OptionOffset) {
             return undefined;
         }
+
         let ret = "";
-		for(let i = 0; i < 6; i++) {
-			ret += this.packet.getUint8(26 + i).toString(16).padStart(2, "0");
-			if(i === 5) {
-				break;
-			}
-			ret += ":";
-		}
+        ret += this.packet.getUint8(ICMPv6NeighborSolicitation._OptionOffset + 2).toString(16).padStart(2, "0") + ":";
+        ret += this.packet.getUint8(ICMPv6NeighborSolicitation._OptionOffset + 3).toString(16).padStart(2, "0") + ":";
+        ret += this.packet.getUint8(ICMPv6NeighborSolicitation._OptionOffset + 4).toString(16).padStart(2, "0") + ":";
+        ret += this.packet.getUint8(ICMPv6NeighborSolicitation._OptionOffset + 5).toString(16).padStart(2, "0") + ":";
+        ret += this.packet.getUint8(ICMPv6NeighborSolicitation._OptionOffset + 6).toString(16).padStart(2, "0") + ":";
+        ret += this.packet.getUint8(ICMPv6NeighborSolicitation._OptionOffset + 7).toString(16).padStart(2, "0");
+			
 		return ret;
     }
     
@@ -236,20 +282,31 @@ class ICMPv6NeighborSolicitation extends ICMPv6Info {
         return `Neighbor Solicitation for ${this.targetAddress.correctForm()}${this.option ? ` from ${this.option}` : ""}`;
     }
 
-    get getProperties(): Array<any> {
-		const arr: Array<any> = [];
-		arr.push("Internet Control Message Protocol v6");
-		arr.push(`Type: Neighbor Solicitation (${this.type})`);
-		arr.push(`Code: (${this.code})`);
-		arr.push(`Checksum: (0x${this.checksum.toString(16)})`);
-		arr.push(`Reserved: 00000000`);
-        arr.push(`Target Address: (${this.targetAddress.correctForm()})`);
-        arr.push(`ICMPv6 Option: Source link-layer address: ${this.option}`);
-		return arr;
+    get getProperties(): Node[] {
+        const byteOffset = this.packet.byteOffset;
+		const defaultState = vscode.TreeItemCollapsibleState.None;
+
+        const element = new Node("Internet Control Message Protocol v6", ``, vscode.TreeItemCollapsibleState.Collapsed, byteOffset, this.packet.byteLength);
+		element.children.push(new Node("Type", `Neighbor Solicitation (${this.type})`, defaultState, byteOffset + ICMPv6Message._TypeOffset, ICMPv6Message._TypeLength));
+		element.children.push(new Node("Code", `${this.code}`, defaultState, byteOffset + ICMPv6Message._CodeOffset, ICMPv6Message._CodeLength));
+        element.children.push(new Node("Checksum", `0x${this.checksum.toString(16)}`, defaultState, byteOffset + ICMPv6Message._ChecksumOffset, ICMPv6Message._ChecksumLength));
+        element.children.push(new Node("Reserved", `00000000`, defaultState, byteOffset + ICMPv6NeighborSolicitation._ReservedOffset, ICMPv6NeighborSolicitation._ReservedLength));
+		element.children.push(new Node("Target Address", `${this.targetAddress.correctForm()}`, defaultState, byteOffset + ICMPv6NeighborSolicitation._TargetAddressOffset, ICMPv6NeighborSolicitation._TargetAddressLength));
+        element.children.push(new Node("ICMPv6 Option", `Source link-layer address ${this.option}`, defaultState, byteOffset + ICMPv6NeighborSolicitation._OptionOffset, ICMPv6NeighborSolicitation._OptionLength));
+		return [element];
 	}
 }
 
 class ICMPv6NeighborAdvertisement extends ICMPv6Info {
+    protected static readonly _FlagsOffset = 4;
+    protected static readonly _ReservedOffset = 5;
+	protected static readonly _TargetAddressOffset = 8;
+	protected static readonly _OptionOffset = 24;
+
+	protected static readonly _FlagsLength = 1;
+    protected static readonly _ReservedLength = 3;
+	protected static readonly _TargetAddressLength = 16;
+	protected static readonly _OptionLength = 6;
     
     constructor(dv: DataView) {
         super(dv);
@@ -287,26 +344,27 @@ class ICMPv6NeighborAdvertisement extends ICMPv6Info {
 		return buffer.trimEnd();
 	}
 
-
     get targetAddress() {
-        const a = this.packet.buffer.slice(this.packet.byteOffset+8, this.packet.byteOffset+8+16);
+        const AddressOffset = this.packet.byteOffset + ICMPv6NeighborAdvertisement._TargetAddressOffset;
+        const a = this.packet.buffer.slice(AddressOffset, AddressOffset+ICMPv6NeighborAdvertisement._TargetAddressLength);
 		const ua = new Uint8Array(a);
 		const na = Array.from(ua);
 		return Address6.fromByteArray(na);
     }   
 
     get option() {
-        if(this.packet.byteLength <= 24) {
+        if(this.packet.byteLength <= ICMPv6NeighborAdvertisement._OptionOffset) {
             return undefined;
         }
+
         let ret = "";
-		for(let i = 0; i < 6; i++) {
-			ret += this.packet.getUint8(26 + i).toString(16).padStart(2, "0");
-			if(i === 5) {
-				break;
-			}
-			ret += ":";
-		}
+        ret += this.packet.getUint8(ICMPv6NeighborAdvertisement._OptionOffset + 2).toString(16).padStart(2, "0") + ":";
+        ret += this.packet.getUint8(ICMPv6NeighborAdvertisement._OptionOffset + 3).toString(16).padStart(2, "0") + ":";
+        ret += this.packet.getUint8(ICMPv6NeighborAdvertisement._OptionOffset + 4).toString(16).padStart(2, "0") + ":";
+        ret += this.packet.getUint8(ICMPv6NeighborAdvertisement._OptionOffset + 5).toString(16).padStart(2, "0") + ":";
+        ret += this.packet.getUint8(ICMPv6NeighborAdvertisement._OptionOffset + 6).toString(16).padStart(2, "0") + ":";
+        ret += this.packet.getUint8(ICMPv6NeighborAdvertisement._OptionOffset + 7).toString(16).padStart(2, "0");
+			
 		return ret;
     }
     
@@ -332,17 +390,19 @@ class ICMPv6NeighborAdvertisement extends ICMPv6Info {
         return `Neighbor Advertisement ${this.targetAddress.correctForm()} (${flags.trimEnd()})${this.option ? ` is at ${this.option}` : ""}`;
     }
 
-    get getProperties(): Array<any> {
-		const arr: Array<any> = [];
-		arr.push("Internet Control Message Protocol v6");
-		arr.push(`Type: Neighbor Advertisement (${this.type})`);
-		arr.push(`Code: (${this.code})`);
-		arr.push(`Checksum: (0x${this.checksum.toString(16)})`);
-        arr.push(`Flags: ${this.getFlags}`);
-		arr.push(`Reserved: 00000000`);
-        arr.push(`Target Address: (${this.targetAddress.correctForm()})`);
-        arr.push(`ICMPv6 Option: Target link-layer address: ${this.option}`);
-		return arr;
+    get getProperties(): Node[] {
+        const byteOffset = this.packet.byteOffset;
+		const defaultState = vscode.TreeItemCollapsibleState.None;
+
+        const element = new Node("Internet Control Message Protocol v6", ``, vscode.TreeItemCollapsibleState.Collapsed, byteOffset, this.packet.byteLength);
+		element.children.push(new Node("Type", `Neighbor Advertisement (${this.type})`, defaultState, byteOffset + ICMPv6Message._TypeOffset, ICMPv6Message._TypeLength));
+		element.children.push(new Node("Code", `${this.code}`, defaultState, byteOffset + ICMPv6Message._CodeOffset, ICMPv6Message._CodeLength));
+        element.children.push(new Node("Checksum", `0x${this.checksum.toString(16)}`, defaultState, byteOffset + ICMPv6Message._ChecksumOffset, ICMPv6Message._ChecksumLength));
+        element.children.push(new Node("Flags", `${this.getFlags}`, defaultState, byteOffset + ICMPv6NeighborAdvertisement._FlagsOffset, ICMPv6NeighborAdvertisement._FlagsLength));
+        element.children.push(new Node("Reserved", `000000`, defaultState, byteOffset + ICMPv6NeighborAdvertisement._ReservedOffset, ICMPv6NeighborAdvertisement._ReservedLength));
+        element.children.push(new Node("Target Address", `${this.targetAddress.correctForm()}`, defaultState, byteOffset + ICMPv6NeighborAdvertisement._TargetAddressOffset, ICMPv6NeighborAdvertisement._TargetAddressLength));
+        element.children.push(new Node("ICMPv6 Option", `Target link-layer address ${this.option}`, defaultState, byteOffset + ICMPv6NeighborAdvertisement._OptionOffset, ICMPv6NeighborAdvertisement._OptionLength));
+		return [element];
 	}
 }
 
@@ -378,41 +438,47 @@ class ICMPv6DestinationUnreachable extends ICMPv6Error {
         return `Destination Unreachable Error: ${this.codeMessage}`;
     }
 
-    get getProperties(): Array<any> {
-		const arr: Array<any> = [];
-		arr.push("Internet Control Message Protocol v6");
-		arr.push(`Type: Destination Unreachable (${this.type})`);
-		arr.push(`Code: ${this.codeMessage} (${this.code})`);
-		arr.push(`Checksum: (0x${this.checksum.toString(16)})`);
-		arr.push(`<ul> <li> <details> <summary> Invoking Packet </summary> <ul> <li> ${this.invokingPacket} </li> </ul> </details> </li> </ul>`);
-		return arr;
+    get getProperties(): Node[] {
+        const byteOffset = this.packet.byteOffset;
+		const defaultState = vscode.TreeItemCollapsibleState.None;
+
+        const element = new Node("Internet Control Message Protocol v6", ``, vscode.TreeItemCollapsibleState.Collapsed, byteOffset, this.packet.byteLength);
+		element.children.push(new Node("Type", `Destination Unreachable (${this.type})`, defaultState, byteOffset + ICMPv6Message._TypeOffset, ICMPv6Message._TypeLength));
+		element.children.push(new Node("Code", `${this.codeMessage} (${this.code})`, defaultState, byteOffset + ICMPv6Message._CodeOffset, ICMPv6Message._CodeLength));
+        element.children.push(new Node("Checksum", `0x${this.checksum.toString(16)}`, defaultState, byteOffset + ICMPv6Message._ChecksumOffset, ICMPv6Message._ChecksumLength));
+        element.children.push(new Node("Invoking Packet", `${this.invokingPacket}`));
+		return [element];
 	}
-    
 }
 
 class ICMPv6PacketTooBig extends ICMPv6Error {
-    
+    protected static readonly _MTUOffset = 4;
+
+	protected static readonly _MTULength = 4;
+
     constructor(dv: DataView) {
         super(dv);
     }
 
     get mtu() {
-        return this.packet.getUint32(4);
+        return this.packet.getUint32(ICMPv6PacketTooBig._MTUOffset);
     }
 
     get toString() {
         return `Packet Too Big Error`;
     }
 
-    get getProperties(): Array<any> {
-		const arr: Array<any> = [];
-		arr.push("Internet Control Message Protocol v6");
-		arr.push(`Type: Packet Too Big (${this.type})`);
-		arr.push(`Code: (${this.code})`);
-		arr.push(`Checksum: (0x${this.checksum.toString(16)})`);
-        arr.push(`Code: (${this.mtu})`);
-		arr.push(`<ul> <li> <details> <summary> Invoking Packet </summary> <ul> <li> ${this.invokingPacket} </li> </ul> </details> </li> </ul>`);
-		return arr;
+    get getProperties(): Node[] {
+        const byteOffset = this.packet.byteOffset;
+		const defaultState = vscode.TreeItemCollapsibleState.None;
+
+        const element = new Node("Internet Control Message Protocol v6", ``, vscode.TreeItemCollapsibleState.Collapsed, byteOffset, this.packet.byteLength);
+		element.children.push(new Node("Type", `Packet Too Big (${this.type})`, defaultState, byteOffset + ICMPv6Message._TypeOffset, ICMPv6Message._TypeLength));
+		element.children.push(new Node("Code", `${this.code}`, defaultState, byteOffset + ICMPv6Message._CodeOffset, ICMPv6Message._CodeLength));
+        element.children.push(new Node("Checksum", `0x${this.checksum.toString(16)}`, defaultState, byteOffset + ICMPv6Message._ChecksumOffset, ICMPv6Message._ChecksumLength));
+		element.children.push(new Node("MTU", `${this.mtu}`, defaultState, byteOffset + ICMPv6PacketTooBig._MTUOffset, ICMPv6PacketTooBig._MTULength));
+        element.children.push(new Node("Invoking Packet", `${this.invokingPacket}`));
+		return [element];
 	}
 }
 
@@ -438,14 +504,16 @@ class ICMPv6TimeExceeded extends ICMPv6Error {
         return `Time Exceeded Error: ${this.codeMessage}`;
     }
 
-    get getProperties(): Array<any> {
-		const arr: Array<any> = [];
-		arr.push("Internet Control Message Protocol v6");
-		arr.push(`Type: Destination Unreachable (${this.type})`);
-		arr.push(`Code: ${this.codeMessage} (${this.code})`);
-		arr.push(`Checksum: (0x${this.checksum.toString(16)})`);
-		arr.push(`<ul> <li> <details> <summary> Invoking Packet </summary> <ul> <li> ${this.invokingPacket} </li> </ul> </details> </li> </ul>`);
-		return arr;
+    get getProperties(): Node[] {
+        const byteOffset = this.packet.byteOffset;
+		const defaultState = vscode.TreeItemCollapsibleState.None;
+
+        const element = new Node("Internet Control Message Protocol v6", ``, vscode.TreeItemCollapsibleState.Collapsed, byteOffset, this.packet.byteLength);
+		element.children.push(new Node("Type", `Time Exceeded (${this.type})`, defaultState, byteOffset + ICMPv6Message._TypeOffset, ICMPv6Message._TypeLength));
+		element.children.push(new Node("Code", `${this.codeMessage} (${this.code})`, defaultState, byteOffset + ICMPv6Message._CodeOffset, ICMPv6Message._CodeLength));
+        element.children.push(new Node("Checksum", `0x${this.checksum.toString(16)}`, defaultState, byteOffset + ICMPv6Message._ChecksumOffset, ICMPv6Message._ChecksumLength));
+        element.children.push(new Node("Invoking Packet", `${this.invokingPacket}`));
+		return [element];
 	}
 }
 
@@ -477,14 +545,15 @@ class ICMPv6ParameterProblem extends ICMPv6Error {
         return `Parameter Problem Error: ${this.codeMessage}`;
     }
 
-    get getProperties(): Array<any> {
-		const arr: Array<any> = [];
-		arr.push("Internet Control Message Protocol v6");
-		arr.push(`Type: Destination Unreachable (${this.type})`);
-		arr.push(`Code: ${this.codeMessage} (${this.code})`);
-		arr.push(`Checksum: (0x${this.checksum.toString(16)})`);
-        arr.push(`Pointer: ${this.pointer}`);
-		arr.push(`<ul> <li> <details> <summary> Invoking Packet </summary> <ul> <li> ${this.invokingPacket} </li> </ul> </details> </li> </ul>`);
-		return arr;
+    get getProperties(): Node[] {
+        const byteOffset = this.packet.byteOffset;
+		const defaultState = vscode.TreeItemCollapsibleState.None;
+
+        const element = new Node("Internet Control Message Protocol v6", ``, vscode.TreeItemCollapsibleState.Collapsed, byteOffset, this.packet.byteLength);
+		element.children.push(new Node("Type", `Parameter Problem (${this.type})`, defaultState, byteOffset + ICMPv6Message._TypeOffset, ICMPv6Message._TypeLength));
+		element.children.push(new Node("Code", `${this.codeMessage} (${this.code})`, defaultState, byteOffset + ICMPv6Message._CodeOffset, ICMPv6Message._CodeLength));
+        element.children.push(new Node("Checksum", `0x${this.checksum.toString(16)}`, defaultState, byteOffset + ICMPv6Message._ChecksumOffset, ICMPv6Message._ChecksumLength));
+        element.children.push(new Node("Invoking Packet", `${this.invokingPacket}`));
+		return [element];
 	}
 }

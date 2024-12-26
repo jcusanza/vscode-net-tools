@@ -1,70 +1,79 @@
-import { ARPPacket } from "./arpPacket";
+import * as vscode from 'vscode';
+import { Node } from "../../packetdetailstree";
+import { EthernetPacket } from "./ether";
 import { GenericPacket } from "./genericPacket";
-import { IPv4Packet } from "./ipv4Packet";
-import { IPv6Packet } from "./ipv6Packet";
-import { vlanPacket } from "./vlanPacket";
+import { FileContext } from "../file/FileContext";
 
 export class SLL2Packet extends GenericPacket {
+	public static readonly Name = "SLL2";
+
+	private static readonly _ProtoOffset = 0;
+	private static readonly _InterfaceIndexOffset = 4;
+	private static readonly _ARPHRDTypeOffset = 8;
+	private static readonly _PacketTypeOffset = 10;
+	private static readonly _LinkLayerAddressLengthOffset = 11;
+	private static readonly _LinkLayerAddressOffset = 12;
+
+	private static readonly _ProtoLength = 2;
+	private static readonly _InterfaceIndexLength = 4;
+	private static readonly _ARPHRDTypeLength = 2;
+	private static readonly _PacketTypeLength = 1;
+	private static readonly _LinkLayerAddressLengthLength = 1;
+	
 	innerPacket: GenericPacket;
 
-	static processPayload(proto: number, payload: DataView): GenericPacket {
-		switch (proto) {
-			case 0x800:
-				if(payload.getUint8(0) >> 4 === 4) {
-					return new IPv4Packet(payload);
-				} else if(payload.getUint8(0) >> 4 === 6) {
-					return new IPv6Packet(payload);
-				} else {
-					return new GenericPacket(payload);
-				}
-				break;
-			case 0x806:
-				return new ARPPacket(payload);
-				break;
-			case 0x8100:
-				return new vlanPacket(payload);
-				break;
-			case 0x86dd:
-				return new IPv6Packet(payload);
-				break;
-			default:
-				return new GenericPacket(payload);
-		}
-	}
+	constructor(packet: DataView, fc:FileContext) {
+		super(packet, fc);
+		//this.registerProtocol(SLL2Packet.Name, fc);
 
-	constructor(packet: DataView) {
-		super(packet);
 		if (this.ARPHRDType === 1 /* Ethernet */ || this.ARPHRDType === 772 /* loopback */ ) {
-			this.innerPacket = SLL2Packet.processPayload(this.proto, new DataView(packet.buffer, packet.byteOffset + 20, packet.byteLength - 20));
+			this.innerPacket = EthernetPacket.processPayload(this.proto, new DataView(packet.buffer, packet.byteOffset + 20, packet.byteLength - 20), fc);
 		} else {
-			this.innerPacket = new GenericPacket(new DataView(packet.buffer, packet.byteOffset + 20, packet.byteLength - 20));
+			this.innerPacket = new GenericPacket(new DataView(packet.buffer, packet.byteOffset + 20, packet.byteLength - 20), fc);
 		}
 	}
 	
 	get linkLayerAddress() {
 		let ret = "";
 		for (let i = 0; i < this.linkLayerAddressLength; i++) {
-			ret += this.packet.getUint8(12+i).toString(16).padStart(2, "0") + ":";
+			ret += this.packet.getUint8(SLL2Packet._LinkLayerAddressOffset+i).toString(16).padStart(2, "0") + ":";
 		}
 		return ret.substring(0, ret.length-1);
 	}
 
 	get proto() {
-		return this.packet.getUint16(0);
+		return this.packet.getUint16(SLL2Packet._ProtoOffset);
 	}
 	get interfaceIndex() {
-		return this.packet.getUint32(4);
+		return this.packet.getUint32(SLL2Packet._InterfaceIndexOffset);
 	}
 	get ARPHRDType() {
-		return this.packet.getUint16(8);
+		return this.packet.getUint16(SLL2Packet._ARPHRDTypeOffset);
 	}
 	get packetType() {
-		return this.packet.getUint8(10);
+		return this.packet.getUint8(SLL2Packet._PacketTypeOffset);
 	}
 	get linkLayerAddressLength() {
-		return this.packet.getUint8(11);
+		return this.packet.getUint8(SLL2Packet._LinkLayerAddressLengthOffset);
 	}
 	
+	get packetTypeText() {
+		switch (this.packetType) {
+			case 0:
+				return "Unicast to us (0)";
+			case 1:
+				return "Broadcast (1)";
+			case 2:
+				return "Multicast (2)";
+			case 3:
+				return "To and from someone else (3)";
+			case 4:
+				return "Sent by us (4)";
+			default:
+				return "";
+		}
+	}
+
 	get toString() {
 		// 00:11:22:33:44:55 > 00:11:22:33:44:55 (0x800)
 		let type = "";
@@ -90,54 +99,19 @@ export class SLL2Packet extends GenericPacket {
 		return `${type} (0x${this.proto.toString(16).padStart(4, "0")}) ${this.innerPacket.toString}`;
 	}
 
-	get getProperties(): Array<any> {
-		let proto = "";
-		switch (this.proto) {
-			case 0x800:
-				proto = "IPv4 ";
-				break;
-			case 0x806:
-				proto = "ARP ";
-				break;
-			case 0x8100:
-				proto = "802.1Q Virtual LAN ";
-				break;
-			case 0x86dd:
-				proto = "IPv6 ";
-				break;
-			default:
-				proto = "";
-		}
+	get getProperties(): Node[] {
+		const byteOffset = this.packet.byteOffset;
+		const defaultState = vscode.TreeItemCollapsibleState.None;
 
-		let pktType = "";
-		switch (this.packetType) {
-			case 0:
-				pktType = "Unicast to us (0)";
-				break;
-			case 1:
-				pktType = "Broadcast (1)";
-				break;
-			case 2:
-				pktType = "Multicast (2)";
-				break;
-			case 3:
-				pktType = "To and from someone else (3)";
-				break;
-			case 4:
-				pktType = "Sent by us (4)";
-				break;
-			default:
-				pktType = "";
-		}
-		const arr: Array<any> = [];
-		arr.push(`*Linux cooked capture v2`);
-		arr.push(`Protocol: ${proto}(0x${this.proto.toString(16)})`);
-		arr.push(`Interface index: ${this.interfaceIndex}`);
-		arr.push(`Link-layer address type: ${this.ARPHRDType}`);
-		arr.push(`Packet type: ${pktType}`);
-		arr.push(`Link-layer address length: ${this.linkLayerAddressLength}`);
-		arr.push(`Link-layer address: ${this.linkLayerAddress}`);
-
-		return [arr, this.innerPacket.getProperties];
+		const elements: Node[] = [];
+		let e = new Node("Linux cooked capture v2", ``, vscode.TreeItemCollapsibleState.Collapsed, byteOffset, this.packet.byteLength - byteOffset);
+		e.children.push(new Node("Protocol", `${EthernetPacket.namePayload(this.proto)} (0x${this.proto.toString(16)})`, defaultState, byteOffset + SLL2Packet._ProtoOffset, SLL2Packet._ProtoLength));
+		e.children.push(new Node("Interface index", `${this.interfaceIndex}`, defaultState, byteOffset + SLL2Packet._InterfaceIndexOffset, SLL2Packet._InterfaceIndexLength));
+		e.children.push(new Node("Link-layer address type", `${this.ARPHRDType}`, defaultState, byteOffset + SLL2Packet._ARPHRDTypeOffset, SLL2Packet._ARPHRDTypeLength));
+		e.children.push(new Node("Packet type", `${this.packetTypeText}`, defaultState, byteOffset + SLL2Packet._PacketTypeOffset, SLL2Packet._PacketTypeLength));
+		e.children.push(new Node("Link-layer address length", `${this.linkLayerAddressLength}`, defaultState, byteOffset + SLL2Packet._LinkLayerAddressLengthOffset, SLL2Packet._LinkLayerAddressLengthLength));
+		e.children.push(new Node("Link-layer address", `${this.linkLayerAddress}`, defaultState, byteOffset + SLL2Packet._LinkLayerAddressOffset, this.linkLayerAddressLength));
+		elements.push(e);
+		return elements.concat(this.innerPacket.getProperties);
 	}
 }

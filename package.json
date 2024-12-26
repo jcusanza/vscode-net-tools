@@ -2,7 +2,7 @@
   "name": "vscode-net-tools",
   "displayName": "Network Tools",
   "description": "Network tools, including pcap and pcapng file parser and viewer",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "publisher": "CusanzaBros",
   "repository": "https://github.com/CusanzaBros/vscode-net-tools",
   "license": "MIT",
@@ -18,23 +18,45 @@
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
-      "panel": [
+      "activitybar": [
         {
-          "id": "packetDetails",
-          "title": "Packet Details",
-          "icon": "media/icon.svg"
+          "id": "network-tools",
+          "title": "Network Tools",
+          "icon": "media/activitybar.svg"
         }
       ]
     },
     "views": {
-      "packetDetails": [
+      "network-tools": [
         {
-          "id": "packetDetails.detailsView",
-          "name": "Packet Details",
+          "id": "packetDetails.protocolanalysis",
+          "name": "Packet Locator"
+        },
+        {
+          "id": "packetDetails.detailstree",
+          "name": "Packet Details"
+        },
+        {
+          "id": "packetDetails.data",
+          "name": "Packet Bytes",
           "type": "webview"
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "packetDetails.protocolanalysis",
+        "contents": "This panel displays a selectable list of protocols and endpoints when a pcap or pcapng file is open and visible."
+      },
+      {
+        "view": "packetDetails.detailstree",
+        "contents": ""
+      },
+      {
+        "view": "packetDetails.data",
+        "contents": "Select a packet from a pcap file to view packet bytes here."
+      }
+    ],
     "customEditors": [
 			{
 				"viewType": "packetreader.pcap",
@@ -45,7 +67,47 @@
 					}
 				]
 			}
-		]
+		],
+    "commands": [
+      {
+				"command": "packetdetails.select",
+				"title": "Packet Details: Select Data"
+			},
+      {
+				"command": "packetanalysis.select",
+				"title": "Packet Analysis: Select Data"
+			},
+      {
+        "command": "packetAnalysis.setFilterMode",
+        "title": "Click to change to highlight mode.",
+        "icon": {
+          "light": "media/select-filter-light.svg",
+          "dark": "media/select-filter-dark.svg"
+        }
+      },
+      {
+        "command": "packetAnalysis.setHighlightMode",
+        "title": "Click to change to filter mode",
+        "icon": {
+          "light": "media/select-highlight-light.svg",
+          "dark": "media/select-highlight-dark.svg"
+        }
+      }
+    ],
+    "menus": {
+    "view/title": [
+        {
+            "command": "packetAnalysis.setFilterMode",
+            "when": "view == packetDetails.protocolanalysis && pcapviewer:isFilterMode",
+            "group": "navigation"
+        },
+        {
+          "command": "packetAnalysis.setHighlightMode",
+          "when": "view == packetDetails.protocolanalysis && !pcapviewer:isFilterMode",
+          "group": "navigation"
+      }
+    ]
+}
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
