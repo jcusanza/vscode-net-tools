@@ -1,17 +1,16 @@
 import * as vscode from 'vscode';
 import { readFileSync } from 'fs';
 import { Disposable, disposeAll } from './dispose';
-import { PCAPNGEnhancedPacketBlock, PCAPNGSimplePacketBlock, PCAPPacketRecord, Section } from "./parsers/file/section";
+import { PCAPNGSystemdJournalExportBlock, PCAPNGEnhancedPacketBlock, PCAPNGSimplePacketBlock, PCAPPacketRecord, Section } from "./parsers/file/section";
 import { PacketDetailsProvider } from './packetdetails';
 import { PacketDetailsTree } from './packetdetailstree';
 import { ProtocolAnalysisTree, ProtocolNode } from './protocolanalysis';
 import { FileContext } from './parsers/file/FileContext';
 
-/**
- * Define the document (the data model) used for paw draw files.
- */
 
-	//#region pcapViewerDocument
+
+//#region pcapViewerDocument
+	
 enum AddressType {
 	Hardware,
 	IPv4,
@@ -84,9 +83,7 @@ export class pcapViewerDocument extends Disposable implements vscode.CustomDocum
 	public get documentData(): Uint8Array { return this._documentData; }
 
 	private readonly _onDidDispose = this._register(new vscode.EventEmitter<void>());
-	/**
-	 * Fired when the document is disposed of.
-	 */
+
 	public readonly onDidDispose = this._onDidDispose.event;
 
 	private readonly _onDidChange = this._register(new vscode.EventEmitter<{
@@ -161,22 +158,7 @@ export class pcapViewerDocument extends Disposable implements vscode.CustomDocum
 	}
 }
 
-/**
- * Provider for paw draw editors.
- *
- * Paw draw editors are used for `.pcapViewer` files, which are just `.png` files with a different file extension.
- *
- * This provider demonstrates:
- *
- * - How to implement a custom editor for binary files.
- * - Setting up the initial webview for a custom editor.
- * - Loading scripts and styles in a custom editor.
- * - Communication between VS Code and the custom editor.
- * - Using CustomDocuments to store information that is shared between multiple custom editors.
- * - Implementing save, undo, redo, and revert.
- * - Backing up a custom editor.
- */
-	//#region CustomEditorProvider
+//#region CustomEditorProvider
 	
 export class pcapViewerProvider implements vscode.CustomReadonlyEditorProvider<pcapViewerDocument> {
 
@@ -227,7 +209,32 @@ export class pcapViewerProvider implements vscode.CustomReadonlyEditorProvider<p
 	constructor(
 		private readonly _context: vscode.ExtensionContext,
 		private readonly _details: PacketDetailsProvider
-	) { }
+	) { 
+		_context.subscriptions.push(vscode.commands.registerCommand('packetAnalysis.showMAC', async () => {
+			const setting = vscode.workspace.getConfiguration('networktools');
+			setting.update("showHardwareAddresses", !setting.get("showHardwareAddresses"), vscode.ConfigurationTarget.Global);
+		}));
+		_context.subscriptions.push(vscode.commands.registerCommand('packetAnalysis.hideMAC', async () => {
+			const setting = vscode.workspace.getConfiguration('networktools');
+			setting.update("showHardwareAddresses", !setting.get("showHardwareAddresses"), vscode.ConfigurationTarget.Global);
+		}));
+		_context.subscriptions.push(vscode.commands.registerCommand('packetAnalysis.showTimeStamp', async () => {
+			const setting = vscode.workspace.getConfiguration('networktools');
+			setting.update("showFullTimestamp", !setting.get("showFullTimestamp"), vscode.ConfigurationTarget.Global);
+		}));
+		_context.subscriptions.push(vscode.commands.registerCommand('packetAnalysis.showTimeOffset', async () => {
+			const setting = vscode.workspace.getConfiguration('networktools');
+			setting.update("showFullTimestamp", !setting.get("showFullTimestamp"), vscode.ConfigurationTarget.Global);
+		}));
+		_context.subscriptions.push(vscode.commands.registerCommand('packetAnalysis.showComments', async () => {
+			const setting = vscode.workspace.getConfiguration('networktools');
+			setting.update("showComments", !setting.get("showComments"), vscode.ConfigurationTarget.Global);
+		}));
+		_context.subscriptions.push(vscode.commands.registerCommand('packetAnalysis.hideComments', async () => {
+			const setting = vscode.workspace.getConfiguration('networktools');
+			setting.update("showComments", !setting.get("showComments"), vscode.ConfigurationTarget.Global);
+		}));
+	}
 
 	public setFilterMode() {
 		this.isFilter = !this.isFilter;
@@ -237,6 +244,7 @@ export class pcapViewerProvider implements vscode.CustomReadonlyEditorProvider<p
 			this.select(this.lastURI, this.lastNode);
 		}
 	}
+
 	public setHighlightMode() {
 		this.isFilter = !this.isFilter;
 		vscode.commands.executeCommand('setContext', 'pcapviewer:isFilterMode', this.isFilter);
@@ -298,9 +306,20 @@ export class pcapViewerProvider implements vscode.CustomReadonlyEditorProvider<p
 	private createAnalysisTree(document:pcapViewerDocument) {
 		const elements = [
 			new ProtocolNode("Clear selection", "", vscode.TreeItemCollapsibleState.None),
+			new ProtocolNode("Interfaces", "", vscode.TreeItemCollapsibleState.Collapsed),
 			new ProtocolNode("Protocols", "", vscode.TreeItemCollapsibleState.Expanded)
 		];
-		const pe = elements[1].children;
+
+		const ie = elements[1].children;
+		for (let entry of document.fc.interfaces) {
+			const arr: number[] = []; 
+			for (let s of entry[1]) {
+				arr.push(s.lineNumber);
+			}
+			ie.push(new ProtocolNode(entry[0], `${entry[1].length} ${entry[1].length > 1 ? "packets" : "packet"}`,vscode.TreeItemCollapsibleState.None, arr));
+		}
+
+		const pe = elements[2].children;
 		for (let entry of [...document.fc.protocols].sort((a, b) => a[0].localeCompare(b[0]))) {
 			const arr: number[] = []; 
 			for (let s of entry[1]) {
@@ -357,6 +376,10 @@ export class pcapViewerProvider implements vscode.CustomReadonlyEditorProvider<p
 		webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview, document);
 
 		this.createAnalysisTree(document);
+
+		vscode.workspace.onDidChangeConfiguration(data => {
+			webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview, document);
+		});
 
 		webviewPanel.webview.onDidReceiveMessage(data => {
 			switch (data.type) {
@@ -426,11 +449,13 @@ export class pcapViewerProvider implements vscode.CustomReadonlyEditorProvider<p
 			try {
 				let _class = "";
 
-				if (section.comments.length) {
-					for (const comment of section.comments) {
-						if (comment.length) {
-							lineNumberOutput += `<span></span>`;
-							lineOutput += `<div class="comment" id="${lines}">// ${comment}</div>`;
+				if (vscode.workspace.getConfiguration('networktools').get('showComments')) {
+					if (section.comments.length) {
+						for (const comment of section.comments) {
+							if (comment.length) {
+								lineNumberOutput += `<span></span>`;
+								lineOutput += `<div class="comment" id="${lines}">// ${comment}</div>`;
+							}
 						}
 					}
 				}
@@ -438,7 +463,8 @@ export class pcapViewerProvider implements vscode.CustomReadonlyEditorProvider<p
 				if (
 					section instanceof PCAPNGEnhancedPacketBlock || 
 					section instanceof PCAPPacketRecord ||
-					section instanceof PCAPNGSimplePacketBlock
+					section instanceof PCAPNGSimplePacketBlock ||
+					section instanceof PCAPNGSystemdJournalExportBlock
 				) {
 
 					_class = ` class="numbered" data-ln="${pktline.toString().padStart(document.sections.length.toString().length, '&').replaceAll('&', '&nbsp;')}"`;
@@ -483,6 +509,9 @@ export class pcapViewerProvider implements vscode.CustomReadonlyEditorProvider<p
 			<body>
 				<div class="text-container">
 				${lineOutput}
+				</div>
+				<div class="minimap-container" id="mmc">
+					<canvas class="minimap" id="mm" width="5"></canvas>
 				</div>
 				<script nonce="${nonce}" src="${scriptUri}"></script>
 			</body>

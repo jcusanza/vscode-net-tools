@@ -8,6 +8,7 @@ The goal of this extension is to provide a set useful tools for anyone that need
 * PCAP and PCAPNG file viewer with parsers for the following protocols:
     * Ethernet II
     * SLL2
+    * Raw IP
     * 802.1Q VLAN
     * PPPoE (Discovery)
     * ARP
@@ -50,8 +51,26 @@ Contributions are also welcome!
 ## Known Issues
 
 * Packet data highlighting for PPPoE not implemented yet 
+* Selected packets are cleared when items in context menu are used.  To restore: clear selection in packet locator, then reselect desired item in the packet locator. 
 
 ## Release Notes
+
+### 1.4.0
+
+* Added minimap next to scrollbar
+
+* Added interface list to packet locator
+
+* Added support for systemd journal export block
+
+* Added settings and context menu: Switch between timestamp or offset time, Hide or show MAC addresses, Hide or show comments 
+
+* Added new protocol parsers
+    * Raw IP (linktype 101)
+
+* Fixed bugs:
+    * Some timestamps incorrectly calculated
+    * Options missing for interface description block and enhanced packet block in packet details
 
 ### 1.3.0
 

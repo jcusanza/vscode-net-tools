@@ -2,7 +2,7 @@
   "name": "vscode-net-tools",
   "displayName": "Network Tools",
   "description": "Network tools, including pcap and pcapng file parser and viewer",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "publisher": "CusanzaBros",
   "repository": "https://github.com/CusanzaBros/vscode-net-tools",
   "license": "MIT",
@@ -92,10 +92,34 @@
           "light": "media/select-highlight-light.svg",
           "dark": "media/select-highlight-dark.svg"
         }
+      },
+      {
+        "command": "packetAnalysis.showTimeStamp",
+        "title": "Show timestamp"
+      },
+      {
+        "command": "packetAnalysis.showTimeOffset",
+        "title": "Show time offset from start"
+      },
+      {
+        "command": "packetAnalysis.showMAC",
+        "title": "Show MAC addresses"
+      },
+      {
+        "command": "packetAnalysis.hideMAC",
+        "title": "Hide MAC addresses"
+      },
+      {
+        "command": "packetAnalysis.showComments",
+        "title": "Show comments"
+      },
+      {
+        "command": "packetAnalysis.hideComments",
+        "title": "Hide comments"
       }
     ],
     "menus": {
-    "view/title": [
+      "view/title": [
         {
             "command": "packetAnalysis.setFilterMode",
             "when": "view == packetDetails.protocolanalysis && pcapviewer:isFilterMode",
@@ -105,9 +129,64 @@
           "command": "packetAnalysis.setHighlightMode",
           "when": "view == packetDetails.protocolanalysis && !pcapviewer:isFilterMode",
           "group": "navigation"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "packetAnalysis.showMAC",
+          "when": "activeCustomEditorId == packetreader.pcap && !config.networktools.showHardwareAddresses",
+          "group": "navigation"
+        },
+        {
+          "command": "packetAnalysis.hideMAC",
+          "when": "activeCustomEditorId == packetreader.pcap && config.networktools.showHardwareAddresses",
+          "group": "navigation"
+        },
+        {
+          "command": "packetAnalysis.showTimeStamp",
+          "when": "activeCustomEditorId == packetreader.pcap && !config.networktools.showFullTimestamp",
+          "group": "navigation"
+        },
+        {
+          "command": "packetAnalysis.showTimeOffset",
+          "when": "activeCustomEditorId == packetreader.pcap && config.networktools.showFullTimestamp",
+          "group": "navigation"
+        },
+        {
+          "command": "packetAnalysis.showComments",
+          "when": "activeCustomEditorId == packetreader.pcap && !config.networktools.showComments",
+          "group": "navigation"
+        },
+        {
+          "command": "packetAnalysis.hideComments",
+          "when": "activeCustomEditorId == packetreader.pcap && config.networktools.showComments",
+          "group": "navigation"
+        }
+			]
+    },
+    "configuration": {
+      "title": "Network Tools",
+      "properties": {
+        "networktools.showHardwareAddresses": {
+          "type": "boolean",
+          "default": true,
+          "scope": "global",
+          "description": "Show Hardware Addresses in text output."
+        },
+        "networktools.showFullTimestamp": {
+          "type": "boolean",
+          "default": true,
+          "scope": "global",
+          "description": "Toggle between showing the full timestamp or elapsed time in the text output."
+        },
+        "networktools.showComments": {
+          "type": "boolean",
+          "default": true,
+          "scope": "global",
+          "description": "Hide or show comments in pcap sections."
+        }
       }
-    ]
-}
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

@@ -103,7 +103,11 @@ export class EthernetPacket extends GenericPacket {
 
 	get toString() {
 		// 00:11:22:33:44:55 > 00:11:22:33:44:55 (0x800)
-		return `${this.srcMAC} > ${this.dstMAC} (0x${this.proto.toString(16).padStart(4, "0")}): ${this.innerPacket.toString}`;
+		if (vscode.workspace.getConfiguration('networktools').get('showHardwareAddresses')) {
+			return `${this.srcMAC} > ${this.dstMAC} (0x${this.proto.toString(16).padStart(4, "0")}): ${this.innerPacket.toString}`;
+		} else {
+			return `(0x${this.proto.toString(16).padStart(4, "0")}): ${this.innerPacket.toString}`;
+		}
 	}
 
 	get getProperties(): Node[] {

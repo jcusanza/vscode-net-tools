@@ -1,7 +1,6 @@
 import * as vscode from "vscode";
 import { Section } from "./parsers/file/section";
 import { PacketDetailsTree, Node } from "./packetdetailstree";
-import { ProtocolAnalysisTree, ProtocolNode } from "./protocolanalysis";
 import { pcapViewerDocument } from "./pcapviewer";
 
 export class PacketDetailsProvider implements vscode.WebviewViewProvider {
