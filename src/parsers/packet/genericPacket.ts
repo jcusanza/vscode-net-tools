@@ -40,8 +40,8 @@ export class GenericPacket {
 			return [];
 		} else {
 			const elements: Node[] = [];
-			let e = new Node("Unparsed Data", ``, vscode.TreeItemCollapsibleState.Collapsed);
-			e.children.push(new Node("Data", `${this.toString}`));
+			let e = new Node("Unparsed Data", ``, vscode.TreeItemCollapsibleState.Collapsed, this.packet.byteOffset, this.packet.byteLength);
+			e.children.push(new Node("Data", `${this.toString}`, vscode.TreeItemCollapsibleState.None, this.packet.byteOffset, this.packet.byteLength));
 			elements.push(e);
 			return elements;
 		}

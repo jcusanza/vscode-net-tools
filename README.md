@@ -10,7 +10,7 @@ The goal of this extension is to provide a set useful tools for anyone that need
     * SLL2
     * Raw IP
     * 802.1Q VLAN
-    * PPPoE (Discovery)
+    * PPPoE
     * ARP
     * IPv4
     * IPv6
@@ -50,10 +50,13 @@ Contributions are also welcome!
 
 ## Known Issues
 
-* Packet data highlighting for PPPoE not implemented yet 
 * Selected packets are cleared when items in context menu are used.  To restore: clear selection in packet locator, then reselect desired item in the packet locator. 
 
 ## Release Notes
+
+### 1.4.1
+
+* Completed PPPoE and added enough PPP for IP payloads
 
 ### 1.4.0
 
