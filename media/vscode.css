@@ -1,22 +1,32 @@
+@supports selector(::-webkit-scrollbar) {
+	html {
+		scrollbar-color: unset;
+	}
+}
+
 body {
-	padding: 0 20px;
+	padding: 0 0px;
 	font-size: var(--vscode-editor-font-size);
 	font-weight: var(--vscode-editor-font-weight);
 	font-family: var(--vscode-editor-font-family);
 	background-color: var(--vscode-editor-background);
 	color: var(--vscode-editor-foreground);
-	contain: layout;
-	display: inline-flex;
-	gap: 10px;
-	line-height: 1.35em;
-	overflow-x: hidden;
-	overflow-y: auto;
+	overflow: auto;
 	white-space: nowrap;
 }
 
 .text-container {
-	overflow-x: auto;
-	overflow-y: hidden;
+	position: absolute;
+	top: 0px;
+	bottom: 0px;
+	left: 1em;
+	right: 6px;
+	text-rendering: optimizeSpeed;
+	line-height: 1.35em;
+}
+
+div.text-container {
+	min-width: max-content;
 }
 
 .comment {
@@ -35,14 +45,6 @@ div::before {
 	color: var(--vscode-editorLineNumber-foreground);
 }
 
-div.text-containerx > div.highlight {
-	background: var(--vscode-editor-lineHighlightBackground);
-	color: var(--vscode-editorBracketHighlight-foreground1);
-}
-div.text-containerx > div.highlight::before {
-	background: var(--vscode-editor-lineHighlightBackground);
-	color: var(--vscode-editorBracketHighlight-foreground1);
-}
 
 div.text-container > div.highlight {
 	background: var(--vscode-editor-findMatchHighlightBackground);
@@ -58,5 +60,26 @@ div.text-container > div.active {
 	color: var(--vscode-list-activeSelectionForeground);
   	outline: 1px solid var(--vscode-list-focusAndSelectionOutline, var(--vscode-contrastActiveBorder, var(--vscode-list-focusOutline)));
 	outline-offset: -1px;
+}
+
+
+.minimap-container { 
+	position: fixed;
+	top: 0px;
+	right: 0px;
+	bottom: 0px;
+	width: 6px;
+	background: var(--vscode-editor-background);
+	z-index: 9999;
+}
+
+.minimap { 
+	position: fixed;
+	top: 0px;
+	right: 0px;
+	width: 5px;
+	bottom: 0px;
+	overflow: hidden;
+	border: none;
 }
 

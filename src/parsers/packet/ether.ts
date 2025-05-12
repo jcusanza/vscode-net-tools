@@ -4,7 +4,7 @@ import { FileContext } from "../file/FileContext";
 import { IPv4Packet } from "./ipv4Packet";
 import { IPv6Packet } from "./ipv6Packet";
 import { vlanPacket } from "./vlanPacket";
-import { pppoedPacket, pppoePacket } from "./pppoePacket";
+import { pppoedPacket, pppoePacket, pppPacket, pppLinkControlPacket, pppIPControlPacket, pppIPv6ControlPacket } from "./pppoePacket";
 import { Node } from "../../packetdetailstree";
 import * as vscode from 'vscode';
 
@@ -17,6 +17,7 @@ export class EthernetPacket extends GenericPacket {
 			case 0x0806: return `ARP`;
 			case 0x8100: return `802.1Q Virtual LAN`;
 			case 0x86dd: return `IPv6`;
+			case 0x880b: return `PPP`;
 			case 0x8863: return `PPPoE Discovery`;
 			case 0x8864: return `PPPoE`;
 			default: return `Unknown`;
@@ -39,22 +40,18 @@ export class EthernetPacket extends GenericPacket {
 				} else {
 					return new GenericPacket(payload, fc);
 				}
-				break;
 			case 0x806:
 				return new ARPPacket(payload, fc);
-				break;
 			case 0x8100:
 				return new vlanPacket(payload, fc);
-				break;
 			case 0x86dd:
 				return new IPv6Packet(payload, fc);
-				break;
+			case 0x880b:
+				return new pppPacket(payload, fc);
 			case 0x8863:
 				return new pppoedPacket(payload, fc);
-				break;
 			case 0x8864:
 				return new pppoePacket(payload, fc);
-				break;
 			default:
 				const generic =  new GenericPacket(payload, fc);
 				generic.registerProtocol(`Ethertype #${proto} (0x${proto.toString(16).padStart(4, "0")})`, fc);
@@ -103,7 +100,11 @@ export class EthernetPacket extends GenericPacket {
 
 	get toString() {
 		// 00:11:22:33:44:55 > 00:11:22:33:44:55 (0x800)
-		return `${this.srcMAC} > ${this.dstMAC} (0x${this.proto.toString(16).padStart(4, "0")}): ${this.innerPacket.toString}`;
+		if (vscode.workspace.getConfiguration('networktools').get('showHardwareAddresses')) {
+			return `${this.srcMAC} > ${this.dstMAC} (0x${this.proto.toString(16).padStart(4, "0")}): ${this.innerPacket.toString}`;
+		} else {
+			return `(0x${this.proto.toString(16).padStart(4, "0")}): ${this.innerPacket.toString}`;
+		}
 	}
 
 	get getProperties(): Node[] {

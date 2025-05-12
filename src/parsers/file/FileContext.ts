@@ -16,6 +16,7 @@ export class FileContext {
     private _currentHeader?:PCAPHeaderRecord|PCAPNGSectionHeaderBlock = undefined;
     public states:PacketState[] = [];
 
+    public interfaces = new Map<string, Section[]>();
     public protocols = new Map<string, Section[]>();
     public addresses = new Map<string, Section[]>();
 
@@ -23,6 +24,8 @@ export class FileContext {
     private _thisSection?:Section = undefined;
     
     public headers:GenericPacket[] = [];
+
+    
 
     constructor(bytes: Uint8Array) {
         this._bytes = bytes;

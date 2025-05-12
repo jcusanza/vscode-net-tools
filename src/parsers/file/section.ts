@@ -1,6 +1,8 @@
 import { EthernetPacket } from "../packet/ether";
 import { GenericPacket, PacketState } from "../packet/genericPacket";
 import { SLL2Packet } from "../packet/sll2";
+import { IPv4Packet } from "../packet/ipv4Packet";
+import { IPv6Packet } from "../packet/ipv6Packet";
 import { Node } from "../../packetdetailstree";
 import * as vscode from 'vscode';
 import { FileType, FileContext } from "./FileContext";
@@ -236,6 +238,12 @@ export class Section {
 		try {
 			if (linktype === 1) {  //Ethernet II
 				p = new EthernetPacket(payload, fc);
+			} else if (linktype === 101) { // Raw IP
+				if (payload.getUint8(0) >> 4 === 4) {
+					p = new IPv4Packet(payload, fc);
+				} else {
+					p = new IPv6Packet(payload, fc);
+				}
 			} else if (linktype === 276) { // Linux SLL2
 				p = new SLL2Packet(payload, fc);
 			} else {
@@ -332,6 +340,17 @@ export class Section {
 	}
 
 	get fileType():number { return -1; };
+
+	
+	registerInterface(Name:string, fc:FileContext) {
+		let p = fc.interfaces.get(Name);
+		if (p === undefined) {
+			p = [];
+			fc.interfaces.set(Name, p);
+		}
+		p?.push(fc.thisSection);
+	}
+	
 }
 
 
@@ -341,8 +360,9 @@ export class Section {
 
 
 export class PCAPPacketRecord extends Section {
-	timestamp1: Date;
+	timestamp1: number;
 	timestamp2: number;
+	ts: bigint;
 	capturedlength: number;
 	originallength: number;
 	packet: GenericPacket;
@@ -353,11 +373,19 @@ export class PCAPPacketRecord extends Section {
 		const dv = new DataView(fc.bytes.buffer, offset, 16);
 		super(new DataView(fc.bytes.buffer, offset, dv.getUint32(8, fc.le) + 16), fc);
 		this.startoffset = offset;
-		this.timestamp1 = new Date(this._packet.getUint32(0, fc.le)*1000);
+		this.timestamp1 = this._packet.getUint32(0, fc.le);
 		this.timestamp2 = this._packet.getUint32(4, fc.le);
 		this.capturedlength = this._packet.getUint32(8, fc.le);
 		this.originallength = this._packet.getUint32(12, fc.le);
 		this.endoffset = this.capturedlength + offset + 16;
+
+		if (header.isMS) {
+			this.ts = (BigInt(this.timestamp1) * 1000000n + BigInt(this.timestamp2)) * 1000n;
+		} else {
+			this.ts =  BigInt(this.timestamp1) * 1000000000n + BigInt(this.timestamp2);
+		}
+
+		header.recordTimestamp(this.ts);
 
 		this.packet = Section.processPayload(header.linktype, new DataView(fc.bytes.buffer, offset + 16, this.capturedlength), fc);
 		
@@ -366,8 +394,25 @@ export class PCAPPacketRecord extends Section {
 		}
 	}
 	
+
+	get timestamp(): string {
+		const header = this.fc.header as PCAPHeaderRecord;
+
+		const ts = vscode.workspace.getConfiguration('networktools').get('showFullTimestamp') ? this.ts : this.ts - header.firstTimestamp;
+		const pow = header.isMS ? 6 : 9;
+		const timeValMS: number = Number(ts/1000000n);
+		const ms = Number(ts%1000000000n) / (header.isMS ? 1000 : 1) | 0;
+		const date = new Date(timeValMS);
+
+		if (vscode.workspace.getConfiguration('networktools').get('showFullTimestamp')) {
+			return `${date.getFullYear()}-${(date.getMonth()+1).toString().padStart(2, "0")}-${date.getDate().toString().padStart(2, "0")} ${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}:${date.getSeconds().toString().padStart(2, "0")}.${(ms).toString().padStart(pow, "0")}`;
+		} else {
+			return `${timeValMS/1000|0}.${(ms).toString().padStart(pow, "0")}`;
+		}
+	}
+
 	get toString() {
-		return `${this.timestamp1.getFullYear()}-${(this.timestamp1.getMonth()+1).toString().padStart(2, "0")}-${this.timestamp1.getDate().toString().padStart(2, "0")} ${this.timestamp1.getHours().toString().padStart(2, "0")}:${this.timestamp1.getMinutes().toString().padStart(2, "0")}:${this.timestamp1.getSeconds().toString().padStart(2, "0")}.${this.timestamp2.toString().padStart(9, "0")}: ${this.packet.toString}`;
+		return `${this.timestamp}: ${this.packet.toString}`;
 	}
 
 	get getProperties(): Node[] {
@@ -411,6 +456,7 @@ export class PCAPHeaderRecord extends Section {
 	fcs: number;
 
 	states: PacketState[] = [];
+	private _firstTS: bigint = 0n;
 
 	constructor(fc: FileContext) {
 		super(new DataView(fc.bytes.buffer, 0, 24), fc);
@@ -436,6 +482,16 @@ export class PCAPHeaderRecord extends Section {
 		this.fcs = this.linktype >> 29;
 		this.linktype = this.linktype & 0x0fffffff;
 		this.endoffset = 24;
+	}
+
+	recordTimestamp(ts: bigint) {
+		if (this._firstTS === 0n) {
+			this._firstTS = ts;
+		}
+	}
+
+	get firstTimestamp():bigint {
+		return this._firstTS;
 	}
 
 	get fileType() {
@@ -476,6 +532,8 @@ export class PCAPNGSection extends Section {
 				return new PCAPNGInterfaceStatisticsBlock(dv, fc);
 			case 0x00000006:
 				return new PCAPNGEnhancedPacketBlock(dv, fc);
+			case 0x00000009:
+				return new PCAPNGSystemdJournalExportBlock(dv, fc);
 			default:
 				return new PCAPNGGenericBlock(dv, fc);
 		}
@@ -529,7 +587,7 @@ export class PCAPNGSection extends Section {
 			if(option.length % 4) {
 				i += 4 - option.length % 4;
 			}
-		} while(i < this._packet.byteLength-4);
+		} while(i < this._packet.byteOffset + this._packet.byteLength-4);
 		
 		return options;
 	}
@@ -573,6 +631,38 @@ export class PCAPNGInterfaceDescriptionBlock extends PCAPNGSection {
 		return "Unnamed";
 	}
 
+	private FormatNegativePower(ts:bigint, pow:number, of:number):string {
+		let div:bigint = BigInt(of ** (pow-3));
+		let divms:bigint = BigInt(of ** (pow));
+		let timeValMS: number = Number(ts/div);
+		let ms = Number(ts%divms);
+		let date = new Date(timeValMS);
+		
+		if (vscode.workspace.getConfiguration('networktools').get('showFullTimestamp')) {
+			return `${date.getFullYear()}-${(date.getMonth()+1).toString().padStart(2, "0")}-${date.getDate().toString().padStart(2, "0")} ${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}:${date.getSeconds().toString().padStart(2, "0")}.${(ms).toString().padStart(pow, "0")}`;
+		} else {
+			return `${timeValMS/1000|0}.${(ms).toString().padStart(pow, "0")}`;
+		}
+	}
+
+	FormatTimestamp(ts: bigint):string {
+		if(this.options !== undefined) {
+			for (const opt of this.options) {
+				if (opt.code === 9) {
+					let val = opt.value.getUint8(0);
+					let pow = val & 0x7F; 
+					if (val & 0x80) { 
+						return this.FormatNegativePower(ts, pow, 2);
+					} else {
+						return this.FormatNegativePower(ts, pow, 10);
+					}
+				}
+			};
+		}
+		// 10^-6
+		return this.FormatNegativePower(ts, 6, 10);
+	}
+
 	get optionText(): string[] {
 		const arr = [];
 		const decoder = new TextDecoder('utf-8');
@@ -596,7 +686,10 @@ export class PCAPNGInterfaceDescriptionBlock extends PCAPNGSection {
 	get getProperties(): Node[] {
 		const decoder = new TextDecoder('utf-8');
 
-		let e = new Node("Interface Description Block", ``, vscode.TreeItemCollapsibleState.Collapsed);
+		let e = new Node("Interface Description Block", ``, vscode.TreeItemCollapsibleState.Expanded);
+		e.children.push(new Node(`Interface ID`, `${this.Name} (${this.interfaceID})`));
+		e.children.push(new Node(`Link Type`, `${getLinkName(this.linkType)} (${this.linkType})`));
+		
 		if(this.options !== undefined) {
 			this.options.forEach( o => {
 				switch(o.code) {
@@ -606,14 +699,58 @@ export class PCAPNGInterfaceDescriptionBlock extends PCAPNGSection {
 					case 2:
 						e.children.push(new Node(`Name`, `${decoder.decode(o.value)}`));
 						break;
+					case 3:
+						e.children.push(new Node(`Description`, `${decoder.decode(o.value)}`));
+						break;
+					case 4:
+						e.children.push(new Node(`IPv4 Address`, `${decoder.decode(o.value)}`));
+						break;
+					case 5:
+						e.children.push(new Node(`IPv6 Address`, `${decoder.decode(o.value)}`));
+						break;
+					case 6:
+						e.children.push(new Node(`MAC Address`, `${decoder.decode(o.value)}`));
+						break;
+					case 7:
+						e.children.push(new Node(`EUI Address`, `${decoder.decode(o.value)}`));
+						break;
+					case 8:
+						e.children.push(new Node(`Speed`, `${decoder.decode(o.value)}`));
+						break;
+					case 9:
+						e.children.push(new Node(`Timestamp Resolution`, `${decoder.decode(o.value)}`));
+						break;
+					case 10:
+						e.children.push(new Node(`Timezone`, `${decoder.decode(o.value)}`));
+						break;
+					case 11:
+						const code = o.value.getUint8(0);
+						const filter = decoder.decode(new DataView(o.value.buffer, o.value.byteOffset+1, o.value.byteLength-1));
+						e.children.push(new Node(`Filter`, `(${code}) ${filter}`));
+						break;
+					case 12:
+						e.children.push(new Node(`OS`, `${decoder.decode(o.value)}`));
+						break;
+					case 13:
+						e.children.push(new Node(`FCS Length`, `${decoder.decode(o.value)}`));
+						break;
+					case 14:
+						e.children.push(new Node(`Timestamp Offset`, `${decoder.decode(o.value)}`));
+						break;
+					case 15:
+						e.children.push(new Node(`Hardware`, `${decoder.decode(o.value)}`));
+						break;
+					case 16:
+						e.children.push(new Node(`TX Speed`, `${decoder.decode(o.value)}`));
+						break;
+					case 17:
+						e.children.push(new Node(`RX Speed`, `${decoder.decode(o.value)}`));
+						break;
 					default:
 						e.children.push(new Node(`Option ${o.code}`, `Unknown`));
 				}
 			});
 		};
-		
-		e.children.push(new Node(`Interface ID`, `${this.Name} (${this.interfaceID})`));
-		e.children.push(new Node(`Link Type`, `${getLinkName(this.linkType)} (${this.linkType})`));
 		
 		return [e];
 	}
@@ -675,7 +812,10 @@ export class PCAPNGEnhancedPacketBlock extends PCAPNGSection {
 	constructor(dv: DataView, fc: FileContext) {
 		super(dv, fc);
 		const header = fc.header as PCAPNGSectionHeaderBlock;
+		header.recordTimestamp(this.ts);
+
 		this.data = Section.processPayload(header.interfaces[this.interfaceID].linkType, new DataView(dv.buffer, dv.byteOffset + 28, this.capturedLength), fc);
+		this.registerInterface(`#${this.interfaceID}: ${header.interfaces[this.interfaceID].Name}`, fc);
 	}
 
 	get interfaceID() {
@@ -688,6 +828,10 @@ export class PCAPNGEnhancedPacketBlock extends PCAPNGSection {
 
 	get tsLow() {
 		return this._packet.getUint32(16, this.fc.le);
+	}
+
+	get ts():bigint {
+		return BigInt(this.tsHigh) << 32n | BigInt(this.tsLow);
 	}
 
 	get capturedLength() {
@@ -707,14 +851,13 @@ export class PCAPNGEnhancedPacketBlock extends PCAPNGSection {
 	}
 	
 	get timestamp(): string {
-		const upper64 = BigInt(this.tsHigh) << 32n;
-		const lower64 = BigInt(this.tsLow);
-		
-		let timeVal: number = Number(upper64 | lower64);
-		let timeValSec: number = timeVal/1000;
-		let ms = timeVal%1000000;
-		let date = new Date(timeValSec);
-		return `${date.getFullYear()}-${(date.getMonth()+1).toString().padStart(2, "0")}-${date.getDate().toString().padStart(2, "0")} ${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}:${date.getSeconds().toString().padStart(2, "0")}.${(ms*1000).toString().padStart(9, "0")}`;
+		const header = this.fc.header as PCAPNGSectionHeaderBlock;
+
+		if (vscode.workspace.getConfiguration('networktools').get('showFullTimestamp')) {
+			return header.interfaces[this.interfaceID].FormatTimestamp(this.ts);
+		} else {
+			return header.interfaces[this.interfaceID].FormatTimestamp(this.ts - header.firstTimestamp);
+		}
 	}
 
 	get toString() {
@@ -750,8 +893,34 @@ export class PCAPNGEnhancedPacketBlock extends PCAPNGSection {
 	get getProperties(): Node[] {
 		const elements: Node[] = [];
 		const header = this.fc.header as PCAPNGSectionHeaderBlock;
+		const decoder = new TextDecoder('utf-8');
+
 		let e = new Node("Enhanced Packet Block", `${this.originalLength} bytes on wire, ${this.capturedLength} bytes captured`, vscode.TreeItemCollapsibleState.Collapsed);
 		e.children.push(new Node("Interface ID", `${header.interfaces[this.interfaceID].Name} (${this.interfaceID})`));
+		if(this.options !== undefined) {
+			this.options.forEach( o => {
+				switch(o.code) {
+					case 1:
+						e.children.push(new Node(`Comment`, `${decoder.decode(o.value)}`));
+						break;
+					case 2:
+						e.children.push(new Node(`Flags`, `${o.value.getUint32(0, this.fc.le)}`));
+						break;
+					case 4:
+						e.children.push(new Node(`Drop Count`, `${o.value.getBigUint64(0, this.fc.le)}`));
+						break;
+					case 5:
+						e.children.push(new Node(`Packet Id`, `${o.value.getBigUint64(0, this.fc.le)}`));
+						break;
+					case 6:
+						e.children.push(new Node(`Queue`, `${o.value.getUint32(0, this.fc.le)}`));
+						break;
+					default:
+						e.children.push(new Node(`Option ${o.code}`, `Unknown`));
+				}
+			});
+		};
+
 		elements.push(e);
 		return elements.concat(this.data.getProperties);
 	}
@@ -893,13 +1062,138 @@ class PCAPNGInterfaceStatisticsBlock extends PCAPNGSection {
 	}
 }
 
+interface JournalField {
+    key: string;
+    value: string;
+	start: number;
+	length: number;
+}
+
+export class PCAPNGSystemdJournalExportBlock extends PCAPNGSection {
+	data: GenericPacket;
+
+	constructor(dv: DataView, fc: FileContext) {
+		super(dv, fc);
+		this.data = new GenericPacket(new DataView(dv.buffer, dv.byteOffset + 8, this.blockLength-12), fc);;
+	}
+
+	get fields(): JournalField[] {
+		const fields: JournalField[] = [];
+		const decoder = new TextDecoder('UTF-8');
+
+		if(this.data.packet.byteLength > 0) {
+			let fieldStart = 0;
+
+			for (let i = fieldStart; i < this.data.packet.byteLength; i++) {
+				if (this.data.packet.getUint8(i) === 0xa) {
+					const line = decoder.decode(new DataView(this.data.packet.buffer, this.data.packet.byteOffset + fieldStart, i - fieldStart));
+					const a = line.split("=", 1);
+					if (a.length === 1) {
+						fields.push({ key: a[0], value: line.substring(a[0].length + 1), start: this.data.packet.byteOffset + fieldStart, length: i - fieldStart });
+					} else {
+						//binary data follows
+						//Don't have sample file to test with but it should have four bytes little endian length followed by that much binary data and a new-line.
+						const length = this.data.packet.getUint32(this.data.packet.byteOffset + i + 1, true);
+						i = i + 4 + length + 1;
+					}
+					fieldStart = i + 1;
+				} 
+			}
+			if (fieldStart < this.data.packet.byteLength) {
+				let i = this.data.packet.byteLength;
+				const line = decoder.decode(new DataView(this.data.packet.buffer, this.data.packet.byteOffset + fieldStart, i - fieldStart));
+					const a = line.split("=", 1);
+					if (a.length === 1) {
+						fields.push({ key: a[0], value: line.substring(a[0].length + 1), start: this.data.packet.byteOffset + fieldStart, length: i - fieldStart });
+					}
+			}
+		}
+
+		return fields;
+	}
+
+	get timestamp(): string {
+		let timeVal: number = 0;
+		for (let f of this.fields) {
+			if (f.key === "__REALTIME_TIMESTAMP") {
+				timeVal = Number(f.value);
+				break;
+			}
+		}
+
+		if (timeVal === 0) {
+			return "Systemd Journal Entry";
+		}
+
+
+		let timeValSec: number = timeVal/1000;
+		let ms = timeVal%1000000;
+		let date = new Date(timeValSec);
+		return `${date.getFullYear()}-${(date.getMonth()+1).toString().padStart(2, "0")}-${date.getDate().toString().padStart(2, "0")} ${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}:${date.getSeconds().toString().padStart(2, "0")}.${(ms*1000).toString().padStart(9, "0")}`;
+	}
+
+	get message(): string {
+		for (let f of this.fields) {
+			if (f.key === "MESSAGE") {
+				return f.value;
+			}
+		}
+		return "Systemd Journal Block";
+	}
+
+	get toString() {
+		return `${this.timestamp}: ${this.message}`;
+	}
+
+	
+	get getProperties(): Node[] {
+		const elements: Node[] = [];
+		let e = new Node("systemd Journal Entry", `${this.data.packet.byteLength} bytes in entry`, vscode.TreeItemCollapsibleState.Expanded);
+		for (let f of this.fields) {
+			e.children.push(new Node(f.key, f.value, vscode.TreeItemCollapsibleState.None, f.start, f.length));
+		}
+		elements.push(e);
+		return elements;
+	}
+
+		
+	get packetStartOffset():number {
+		return this.data.packet.byteOffset;
+	}
+
+	get getHex(): string {
+		let ret = "";
+		for (let i = 0; i < this.data.packet.byteLength; i++) {
+			ret += this.data.packet.getUint8(i).toString(16).padStart(2, "0") + " ";
+		}
+		return ret.trimEnd();
+	}
+
+	get getASCII(): string {
+		const decoder = new TextDecoder('ascii');
+		return decoder.decode(this.data.packet).replaceAll(/[\x00\W]/g, ".");
+
+	}
+}
+
 export class PCAPNGSectionHeaderBlock extends PCAPNGSection {
 	public interfaceCount: number = 0;
 	public interfaces: PCAPNGInterfaceDescriptionBlock[] = [];
 	public states: PacketState[] = [];
+	private _firstTS: bigint = 0n;
 
 	constructor(dv: DataView, fc: FileContext) {
 		super(dv, fc);
+	}
+
+	recordTimestamp(ts: bigint) {
+		if (this._firstTS === 0n) {
+			this._firstTS = ts;
+		}
+	}
+
+	get firstTimestamp():bigint {
+		return this._firstTS;
 	}
 
 	get le():boolean {
