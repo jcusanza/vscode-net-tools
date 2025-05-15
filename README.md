@@ -54,6 +54,10 @@ Contributions are also welcome!
 
 ## Release Notes
 
+### 1.4.2
+
+* Added .cap to supported file extensions
+
 ### 1.4.1
 
 * Completed PPPoE and added enough PPP for IP payloads

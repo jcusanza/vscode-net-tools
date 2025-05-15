@@ -2,7 +2,7 @@
   "name": "vscode-net-tools",
   "displayName": "Network Tools",
   "description": "Network tools, including pcap and pcapng file parser and viewer",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "publisher": "CusanzaBros",
   "repository": "https://github.com/CusanzaBros/vscode-net-tools",
   "license": "MIT",
@@ -63,7 +63,7 @@
 				"displayName": "pcap file",
 				"selector": [
 					{
-						"filenamePattern": "{*.pcap,*.pcapng}"
+						"filenamePattern": "{*.cap,*.pcap,*.pcapng}"
 					}
 				]
 			}
