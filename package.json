@@ -63,7 +63,7 @@
 				"displayName": "pcap file",
 				"selector": [
 					{
-						"filenamePattern": "{*.pcap,*.pcapng}"
+						"filenamePattern": "{*.cap,*.pcap,*.pcapng}"
 					}
 				]
 			}

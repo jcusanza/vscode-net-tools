@@ -56,11 +56,19 @@ Contributions are also welcome!
 
 ## Release Notes
 
+### 1.4.2
+
+* Added .cap to supported file extensions
+
 ### 1.5.0
 
 * Added new protocol parsers
     * GRE
     * IP-in-IP
+
+### 1.4.2
+
+* Added .cap to supported file extensions
 
 ### 1.4.1
 
