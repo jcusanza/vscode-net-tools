@@ -4,6 +4,12 @@ All notable changes to the "vscode-net-tools" extension will be documented in th
 
 ## 1.x Initial Release
 
+### 1.5.0
+
+* Added new protocol parsers
+    * GRE
+    * IP-in-IP
+
 ### 1.4.2
 
 * Added .cap to supported file extensions

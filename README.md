@@ -14,6 +14,8 @@ The goal of this extension is to provide a set useful tools for anyone that need
     * ARP
     * IPv4
     * IPv6
+    * GRE
+    * IP-in-IP
     * IGMP
     * TCP
     * UDP
@@ -53,6 +55,16 @@ Contributions are also welcome!
 * Selected packets are cleared when items in context menu are used.  To restore: clear selection in packet locator, then reselect desired item in the packet locator. 
 
 ## Release Notes
+
+### 1.4.2
+
+* Added .cap to supported file extensions
+
+### 1.5.0
+
+* Added new protocol parsers
+    * GRE
+    * IP-in-IP
 
 ### 1.4.2
 
