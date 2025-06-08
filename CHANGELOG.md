@@ -4,6 +4,31 @@ All notable changes to the "vscode-net-tools" extension will be documented in th
 
 ## 1.x Initial Release
 
+### 1.4.2
+
+* Added .cap to supported file extensions
+
+### 1.4.1
+
+* Completed PPPoE and added enough PPP for IP payloads
+
+### 1.4.0
+
+* Added minimap next to scrollbar
+
+* Added interface list to packet locator
+
+* Added support for systemd journal export block
+
+* Added settings and context menu: Switch between timestamp or offset time, Hide or show MAC addresses, Hide or show comments 
+
+* Added new protocol parsers
+    * Raw IP (linktype 101)
+
+* Fixed bugs:
+    * Some timestamps incorrectly calculated
+    * Options missing for interface description block and enhanced packet block in packet details
+
 ### 1.3.0
 
 * Added icon to activity bar and relocated details and data to primary sidebar to make room for additional sections
@@ -53,6 +78,8 @@ All notable changes to the "vscode-net-tools" extension will be documented in th
     * Showing line-numbering for non-packet rows
 
 * Added in-line comments
+
+
 
 ### 1.0.0
 
