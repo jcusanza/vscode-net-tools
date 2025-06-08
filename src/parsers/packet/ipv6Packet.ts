@@ -7,6 +7,7 @@ import { ICMPPacket } from "./icmpPacket";
 import { TCPPacket } from "./tcpPacket";
 import { UDPPacket } from "./udpPacket";
 import { ICMPv6Packet } from "./icmpv6Packet";
+import { IPv4Packet } from "./ipv4Packet";
 
 export class IPv6Packet extends GenericPacket {
 	public static readonly Name = "IPv6";
@@ -87,6 +88,11 @@ export class IPv6Packet extends GenericPacket {
 					new DataView(packet.buffer, packet.byteOffset + headerLength, payloadLength), fc
 				);
 				break;
+			case 0x04:
+				return new IPv4Packet(
+					new DataView(packet.buffer, packet.byteOffset + headerLength, payloadLength), fc
+				);
+				break;
 			case 0x06:
 				return new TCPPacket(
 					new DataView(packet.buffer, packet.byteOffset + headerLength, payloadLength), fc
@@ -118,6 +124,8 @@ export class IPv6Packet extends GenericPacket {
 				return "Hop-by-Hop Options Header";
 			case 0x01:
 				return "ICMP";
+			case 0x04:
+				return "IPIP";
 			case 0x06:
 				return "TCP";
 			case 0x11:
@@ -182,6 +190,8 @@ class IPv6HopByHop extends GenericPacket {
 				return "Hop-by-Hop Options Header";
 			case 0x01:
 				return "ICMP";
+			case 0x04:
+				return "IPIP";
 			case 0x06:
 				return "TCP";
 			case 0x11:

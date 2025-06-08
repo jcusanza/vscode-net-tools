@@ -6,6 +6,7 @@ import { ICMPPacket } from "./icmpPacket";
 import { TCPPacket } from "./tcpPacket";
 import { UDPPacket } from "./udpPacket";
 import { igmpPacket } from "./igmpPacket";
+import { grePacket } from './grePacket';
 
 const IPv4Offset = {
 	Version: 0,
@@ -57,11 +58,17 @@ export class IPv4Packet extends GenericPacket {
 			case 0x02:
 				this.innerPacket = new igmpPacket(dv, fc);
 				break;
+			case 0x04:
+				this.innerPacket = new IPv4Packet(dv, fc);
+				break;
 			case 0x06:
 				this.innerPacket = new TCPPacket(dv, fc);
 				break;
 			case 0x11:
 				this.innerPacket = new UDPPacket(dv, fc);
+				break;
+			case 0x2F:
+				this.innerPacket = new grePacket(dv, fc);
 				break;
 			default:
 				this.innerPacket = new GenericPacket(dv, fc);
@@ -176,10 +183,14 @@ export class IPv4Packet extends GenericPacket {
 				return "ICMP";
 			case 0x02:
 				return "IGMP";
+			case 0x04:
+				return "IPIP";
 			case 0x06:
 				return "TCP";
 			case 0x11:
 				return "UDP";
+			case 0x2F:
+				return "GRE";
 			default:
 				return "Unknown";
 		}

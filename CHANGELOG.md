@@ -4,6 +4,12 @@ All notable changes to the "vscode-net-tools" extension will be documented in th
 
 ## 1.x Initial Release
 
+### 1.5.0
+
+* Added new protocol parsers
+    * GRE
+    * IP-in-IP
+
 ### 1.3.0
 
 * Added icon to activity bar and relocated details and data to primary sidebar to make room for additional sections
