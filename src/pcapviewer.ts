@@ -259,7 +259,7 @@ export class pcapViewerProvider implements vscode.CustomReadonlyEditorProvider<p
 		this.lastNode = node;
 
 		for (let w of this.webviews.get(uri)) {
-			let r = w.webview.postMessage({ command: 'customevent', filterMode: this.isFilter, data: node.items });
+			let r = w.webview.postMessage({ command: 'customevent', filterMode: this.isFilter, data: [...node.items] });
 		}
 	}
 
@@ -312,18 +312,18 @@ export class pcapViewerProvider implements vscode.CustomReadonlyEditorProvider<p
 
 		const ie = elements[1].children;
 		for (let entry of document.fc.interfaces) {
-			const arr: number[] = []; 
+			const arr = new Set<number>(); 
 			for (let s of entry[1]) {
-				arr.push(s.lineNumber);
+				arr.add(s.lineNumber);
 			}
 			ie.push(new ProtocolNode(entry[0], `${entry[1].length} ${entry[1].length > 1 ? "packets" : "packet"}`,vscode.TreeItemCollapsibleState.None, arr));
 		}
 
 		const pe = elements[2].children;
 		for (let entry of [...document.fc.protocols].sort((a, b) => a[0].localeCompare(b[0]))) {
-			const arr: number[] = []; 
+			const arr = new Set<number>(); 
 			for (let s of entry[1]) {
-				arr.push(s.lineNumber);
+				arr.add(s.lineNumber);	
 			}
 			pe.push(new ProtocolNode(entry[0], `${entry[1].length} ${entry[1].length > 1 ? "packets" : "packet"}`,vscode.TreeItemCollapsibleState.None, arr));
 		}
@@ -344,9 +344,9 @@ export class pcapViewerProvider implements vscode.CustomReadonlyEditorProvider<p
 		ae.push(ipv6);
 
 		for (let entry of [...document.fc.addresses].sort((a, b) => a[0].localeCompare(b[0]))) {
-			const arr: number[] = []; 
+			const arr = new Set<number>(); 
 			for (let s of entry[1]) {
-				arr.push(s.lineNumber);
+				arr.add(s.lineNumber);
 			}
 			let push = ae;
 			switch (this.getAddressType(entry[0])) {

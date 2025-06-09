@@ -24,6 +24,23 @@ enum TLSHandshakeMessageTypes {
     message_hash = 254 
 }
 
+
+let TLSHandshakeMessageNames = new Map<number, string>([
+	[TLSHandshakeMessageTypes.client_hello, "Client Hello"],
+    [TLSHandshakeMessageTypes.server_hello,"Server Hello"],
+    [TLSHandshakeMessageTypes.new_session_ticket,"New Session Ticket"],
+    [TLSHandshakeMessageTypes.end_of_early_data,"End of Early Data"],
+    [TLSHandshakeMessageTypes.encrypted_extensions,"Encrypted Extensions"],
+    [TLSHandshakeMessageTypes.certificate,"Certificate"],
+    [TLSHandshakeMessageTypes.certificate_request,"Certificate Request"],
+    [TLSHandshakeMessageTypes.certificate_verify,"Certificate Verify"],
+    [TLSHandshakeMessageTypes.finished,"Finished"],
+    [TLSHandshakeMessageTypes.key_update,"Key Update"],
+    [TLSHandshakeMessageTypes.message_hash,"Message Hash"]
+	]);
+
+
+
 export class TLSPacket extends GenericPacket {
 	public static readonly Name = "TLS";
 
@@ -82,11 +99,35 @@ export class TLSRecord extends GenericPacket {
         return this.packet.getUint8(0);
     }
 
-    get ProtocolVersion() {
+	get ContentTypeText(){
+        switch (this.ContentType) {
+			case TLSContentTypes.change_cipher_spec:
+				return "Change Cipher Spec";
+			case TLSContentTypes.alert:
+				return "Alert";
+			case TLSContentTypes.application_data:
+				return "Application Data";
+			case TLSContentTypes.handshake:
+				return "Handshake";
+		};
+    }
+
+    get RecordProtocolVersion() {
         return this.packet.getUint16(1);
     }
 
-    get length() {
+	get RecordProtocolVersionName() {
+        switch (this.RecordProtocolVersion) {
+			case 0x301:
+				return "TLS 1.0";
+			case 0x303:
+				return "TLS 1.3";
+			default:
+				return "TLS ?.?";	
+		};
+    }
+
+    get RecordLength() {
         return this.packet.getUint16(3);
     }
 
@@ -95,8 +136,13 @@ export class TLSRecord extends GenericPacket {
 	}
 
 	get getProperties(): Node[] {
-		const element = new Node("Transport Layer Security", ``, vscode.TreeItemCollapsibleState.Collapsed);
-		return [element];
+		const e = new Node("Transport Layer Security", ``, vscode.TreeItemCollapsibleState.Collapsed);
+		const e2 = new Node("TLS Record Layer", ``, vscode.TreeItemCollapsibleState.Collapsed);
+		e2.children.push(new Node("Content Type", `${this.ContentTypeText} (${this.ContentType})`, vscode.TreeItemCollapsibleState.None, this.packet.byteOffset+6, 6));
+		e2.children.push(new Node("Version", `${this.RecordProtocolVersionName} (0x${this.RecordProtocolVersion.toString(16)})`, vscode.TreeItemCollapsibleState.None, this.packet.byteOffset+6, 6));
+		e2.children.push(new Node("Length", `${this.RecordLength}`, vscode.TreeItemCollapsibleState.None, this.packet.byteOffset+6, 6));
+		e.children.push(e2);
+		return [e];
 	}
 }
 
@@ -114,8 +160,8 @@ export class TLSChangeCipherSpec extends TLSRecord {
 	}
 
 	get getProperties(): Node[] {
-		const element = new Node("Transport Layer Security", ``, vscode.TreeItemCollapsibleState.Collapsed);
-		return [element];
+		const e = super.getProperties;
+		return e;
 	}
 
 }
@@ -134,8 +180,8 @@ export class TLSApplicationData extends TLSRecord {
 	}
 
 	get getProperties(): Node[] {
-		const element = new Node("Transport Layer Security", ``, vscode.TreeItemCollapsibleState.Collapsed);
-		return [element];
+		const e = super.getProperties;
+		return e;
 	}
 
 }
@@ -163,27 +209,32 @@ export class TLSAlert extends TLSRecord {
 
 
 	get getProperties(): Node[] {
-		const element = new Node("Transport Layer Security", ``, vscode.TreeItemCollapsibleState.Collapsed);
-		return [element];
+		const e = super.getProperties;
+		return e;
 	}
 
 }
 
-// #region TLSHandshake
+// #region Handshake
 
 export class TLSHandshake extends TLSRecord {
-    private offset:number = 5;
+    private static HandshakeOffset:number = 5;
 
     constructor(packet: DataView, fc:FileContext) {
 		super(packet, fc);
 	}
 
     get MessageType(){
-        return this.packet.getUint8(this.offset + 0);
+        return this.packet.getUint8(TLSHandshake.HandshakeOffset + 0);
     }
 
-    get length() {
-        return (this.packet.getUint8(this.offset + 1) << 16) & (this.packet.getUint8(this.offset + 2) << 8) & (this.packet.getUint8(this.offset + 3));
+	get MessageTypeText():string {
+		const val = TLSHandshakeMessageNames.get(this.MessageType);
+		return val === undefined ? "" : val;
+	}
+
+    get Length() {
+        return this.packet.getUint32(TLSHandshake.HandshakeOffset + 0) & 0xFFFFFF;
     }
 
     get toString() {
@@ -192,30 +243,61 @@ export class TLSHandshake extends TLSRecord {
 
 
 	get getProperties(): Node[] {
-		const element = new Node("Transport Layer Security", ``, vscode.TreeItemCollapsibleState.Collapsed);
-		return [element];
+		const e = super.getProperties;
+		const e2 = new Node("Handshake Protocol", this.MessageTypeText, vscode.TreeItemCollapsibleState.Collapsed);
+		e2.children.push(new Node("Handshake Type", `${this.MessageTypeText} (${this.MessageType})`, vscode.TreeItemCollapsibleState.None, this.packet.byteOffset+6, 6));
+		e2.children.push(new Node("Length", `${this.Length}`, vscode.TreeItemCollapsibleState.None, this.packet.byteOffset+6, 6));
+		e[e.length-1].children[e[e.length-1].children.length-1].children.push(e2);
+		return e;
 	}
 
 }
 
-// #region Handshake Messages
-
+// #region Client Hello
 
 export class TLSClientHello extends TLSHandshake {
+    private static ClientHelloOffset:number = 9;
+
 	constructor(packet: DataView, fc:FileContext) {
 		super(packet, fc);
 	}
 
+    get ProtocolVersion() {
+        return this.packet.getUint16(TLSClientHello.ClientHelloOffset);
+    }
+
+	get ProtocolVersionName() {
+        switch (this.ProtocolVersion) {
+			case 0x301:
+				return "TLS 1.0";
+			case 0x303:
+				return "TLS 1.2";
+			default:
+				return "TLS ?.?";	
+		};
+    }
+
+	get Random() {
+		return "";
+	}
 	get toString() {
 		return `TLS Client Hello`;
 	}
 
 	get getProperties(): Node[] {
-		const element = new Node("Transport Layer Security", ``, vscode.TreeItemCollapsibleState.Collapsed);
-		return [element];
+		const e = super.getProperties; //top/TLS/Record/Handshake
+		const tls = e[e.length-1].children;
+		const record = tls[tls.length-1].children;
+		const handshake = record[record.length-1].children;
+		handshake.push(new Node("Version", `${this.ProtocolVersionName} (0x${this.ProtocolVersion.toString(16)})`, vscode.TreeItemCollapsibleState.None, this.packet.byteOffset+6, 6));
+		handshake.push(new Node("Random", `${this.ProtocolVersionName} (0x${this.ProtocolVersion.toString(16)})`, vscode.TreeItemCollapsibleState.None, this.packet.byteOffset+6, 6));
+
+		return e;
 	}
 
 }
+
+// #region Server Hello
 
 export class TLSServerHello extends TLSHandshake {
 	constructor(packet: DataView, fc:FileContext) {
@@ -235,6 +317,8 @@ export class TLSServerHello extends TLSHandshake {
 	}
 }
 
+// #region New Session Ticket
+
 export class TLSNewSessionTicket extends TLSHandshake {
 	constructor(packet: DataView, fc:FileContext) {
 		super(packet, fc);
@@ -252,6 +336,8 @@ export class TLSNewSessionTicket extends TLSHandshake {
 
 }
 
+// #region End of Early Data
+
 export class TLSEndOfEarlyData extends TLSHandshake {
 	constructor(packet: DataView, fc:FileContext) {
 		super(packet, fc);
@@ -266,6 +352,8 @@ export class TLSEndOfEarlyData extends TLSHandshake {
 		return [element];
 	}
 }
+
+// #region Encrypted Extensions
 
 export class TLSEncryptedExtensions extends TLSHandshake {
 	constructor(packet: DataView, fc:FileContext) {
@@ -283,6 +371,8 @@ export class TLSEncryptedExtensions extends TLSHandshake {
 
 }
 
+// #region Certificate
+
 export class TLSCertificate extends TLSHandshake {
 	constructor(packet: DataView, fc:FileContext) {
 		super(packet, fc);
@@ -297,6 +387,8 @@ export class TLSCertificate extends TLSHandshake {
 		return [element];
 	}
 }
+
+// #region Certificate Request
 
 export class TLSCertificateRequest extends TLSHandshake {
 	constructor(packet: DataView, fc:FileContext) {
@@ -313,6 +405,8 @@ export class TLSCertificateRequest extends TLSHandshake {
 	}
 }
 
+// #region Certificate Verify
+
 export class TLSCertificateVerify extends TLSHandshake {
 	constructor(packet: DataView, fc:FileContext) {
 		super(packet, fc);
@@ -327,6 +421,8 @@ export class TLSCertificateVerify extends TLSHandshake {
 		return [element];
 	}
 }
+
+// #region Finished
 
 export class TLSFinished extends TLSHandshake {
 	constructor(packet: DataView, fc:FileContext) {
@@ -343,6 +439,8 @@ export class TLSFinished extends TLSHandshake {
 	}
 }
 
+// #region Key Update
+
 export class TLSKeyUpdate extends TLSHandshake {
 	constructor(packet: DataView, fc:FileContext) {
 		super(packet, fc);
@@ -357,6 +455,8 @@ export class TLSKeyUpdate extends TLSHandshake {
 		return [element];
 	}
 }
+
+// #region Message Hash
 
 export class TLSMessageHash extends TLSHandshake {
 	constructor(packet: DataView, fc:FileContext) {

@@ -6,6 +6,7 @@ import { IPv6Packet } from "../packet/ipv6Packet";
 import { Node } from "../../packetdetailstree";
 import * as vscode from 'vscode';
 import { FileType, FileContext } from "./FileContext";
+import { Address6 } from "ip-address";
 
 function getLinkName(id:number):string {
 	switch (id) {
@@ -683,6 +684,49 @@ export class PCAPNGInterfaceDescriptionBlock extends PCAPNGSection {
 		return arr;
 	}
 	
+	private IPv4AddressToString(value:DataView):string {
+		let ret = "";
+		ret += value.getUint8(0) + ".";
+		ret += value.getUint8(1) + ".";
+		ret += value.getUint8(2) + ".";
+		ret += value.getUint8(3);
+		return ret;
+	}
+
+	private IPv6AddressToString(value:DataView):string {
+		const v6: number[] = [
+			value.getUint8(0),
+			value.getUint8(1),
+			value.getUint8(2),
+			value.getUint8(3),
+			value.getUint8(4),
+			value.getUint8(5),
+			value.getUint8(6),
+			value.getUint8(7),
+			value.getUint8(8),
+			value.getUint8(9),
+			value.getUint8(10),
+			value.getUint8(11),
+			value.getUint8(12),
+			value.getUint8(13),
+			value.getUint8(14),
+			value.getUint8(15)
+		];
+		return Address6.fromByteArray(v6).correctForm();
+	}
+
+	private MacAddressToString(value:DataView):string {
+		let ret = "";
+		ret += value.getUint8(0).toString(16).padStart(2, "0") + ":";
+		ret += value.getUint8(1).toString(16).padStart(2, "0") + ":";
+		ret += value.getUint8(2).toString(16).padStart(2, "0") + ":";
+		ret += value.getUint8(3).toString(16).padStart(2, "0") + ":";
+		ret += value.getUint8(4).toString(16).padStart(2, "0") + ":";
+		ret += value.getUint8(5).toString(16).padStart(2, "0");
+		return ret.toUpperCase();
+	}
+
+
 	get getProperties(): Node[] {
 		const decoder = new TextDecoder('utf-8');
 
@@ -703,13 +747,13 @@ export class PCAPNGInterfaceDescriptionBlock extends PCAPNGSection {
 						e.children.push(new Node(`Description`, `${decoder.decode(o.value)}`));
 						break;
 					case 4:
-						e.children.push(new Node(`IPv4 Address`, `${decoder.decode(o.value)}`));
+						e.children.push(new Node(`IPv4 Address`, `${this.IPv4AddressToString(o.value)}`));
 						break;
 					case 5:
-						e.children.push(new Node(`IPv6 Address`, `${decoder.decode(o.value)}`));
+						e.children.push(new Node(`IPv6 Address`, `${this.IPv6AddressToString(o.value)}`));
 						break;
 					case 6:
-						e.children.push(new Node(`MAC Address`, `${decoder.decode(o.value)}`));
+						e.children.push(new Node(`MAC Address`, `${this.MacAddressToString(o.value)}`));
 						break;
 					case 7:
 						e.children.push(new Node(`EUI Address`, `${decoder.decode(o.value)}`));
