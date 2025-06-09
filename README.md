@@ -56,9 +56,13 @@ Contributions are also welcome!
 
 ## Release Notes
 
-### 1.4.2
+### 1.5.1
 
-* Added .cap to supported file extensions
+* Improved TLS parser slightly
+* Fixed bugs:
+    * Packets with nested protocols failed to highlight or filter correctly when selected
+    * Improved formatting of addresses in interface description block
+    * Inconsistent formatting of ICMPv6 request and reply data
 
 ### 1.5.0
 

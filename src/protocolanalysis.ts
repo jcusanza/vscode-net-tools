@@ -26,7 +26,7 @@ export class ProtocolNode extends vscode.TreeItem {
     public readonly label: string,
     private version?: string,
     public readonly collapsibleState?: vscode.TreeItemCollapsibleState,
-    public items: number[] = []
+    public items:Set<number> = new Set<number>()
   ) {
     super(label, collapsibleState);
     this.description = this.version;
