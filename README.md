@@ -15,6 +15,7 @@ The goal of this extension is to provide a set useful tools for anyone that need
     * IPv4
     * IPv6
     * GRE
+    * MPLS
     * IP-in-IP
     * IGMP
     * TCP
@@ -55,6 +56,11 @@ Contributions are also welcome!
 * Selected packets are cleared when items in context menu are used.  To restore: clear selection in packet locator, then reselect desired item in the packet locator. 
 
 ## Release Notes
+
+### 1.6.0
+
+* Added new protocol Parser
+    * MPLS
 
 ### 1.5.1
 
