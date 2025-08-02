@@ -168,7 +168,7 @@ class ICMPv6EchoRequest extends ICMPv6Info {
     get data() {
         let ret = "";
 		for (let i = ICMPv6EchoRequest._DataOffset; i < this.packet.byteLength; i++) {
-			ret += this.packet.getUint8(i).toString(16).padStart(2, "0");
+			ret += this.packet.getUint8(i).toString(16).padStart(2, "0") + " ";
 		}
 		return ret;
     }

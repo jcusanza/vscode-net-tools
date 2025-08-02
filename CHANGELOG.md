@@ -9,6 +9,14 @@ All notable changes to the "vscode-net-tools" extension will be documented in th
 * Added new protocol Parser
     * MPLS
 
+### 1.5.1
+
+* Improved TLS parser slightly
+* Fixed bugs:
+    * Packets with nested protocols failed to highlight or filter correctly when selected
+    * Improved formatting of addresses in interface description block
+    * Inconsistent formatting of ICMPv6 request and reply data
+
 ### 1.5.0
 
 * Added new protocol parsers
