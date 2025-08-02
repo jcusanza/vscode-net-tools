@@ -4,6 +4,11 @@ All notable changes to the "vscode-net-tools" extension will be documented in th
 
 ## 1.x Initial Release
 
+### 1.6.0
+
+* Added new protocol Parser
+    * MPLS
+
 ### 1.5.0
 
 * Added new protocol parsers

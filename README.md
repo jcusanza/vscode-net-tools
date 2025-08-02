@@ -15,6 +15,7 @@ The goal of this extension is to provide a set useful tools for anyone that need
     * IPv4
     * IPv6
     * GRE
+    * MPLS
     * IP-in-IP
     * IGMP
     * TCP
@@ -56,9 +57,10 @@ Contributions are also welcome!
 
 ## Release Notes
 
-### 1.4.2
+### 1.6.0
 
-* Added .cap to supported file extensions
+* Added new protocol Parser
+    * MPLS
 
 ### 1.5.0
 
